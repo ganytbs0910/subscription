@@ -7,6 +7,11 @@ import {
   TouchableOpacity,
   ActivityIndicator,
   Alert,
+  Modal,
+  TextInput,
+  KeyboardAvoidingView,
+  Platform,
+  Linking,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -26,8 +31,18 @@ import {
 } from '../../services/gmailService';
 import {
   parseMultipleEmails,
+  parseMultipleGenericEmails,
   DetectedSubscription,
 } from '../../services/emailParser';
+import {
+  fetchICloudSubscriptionEmails,
+  storeICloudCredentials,
+  getStoredICloudCredentials,
+  clearICloudCredentials,
+  convertToGenericFormat,
+  ICloudCredentials,
+  ICloudStatus,
+} from '../../services/icloudService';
 import { getCategoryLabel } from '../../utils/presets';
 import { formatPrice } from '../../utils/calculations';
 import type { RootStackParamList, BillingCycle } from '../../types';
@@ -35,6 +50,7 @@ import type { RootStackParamList, BillingCycle } from '../../types';
 type NavigationProp = NativeStackNavigationProp<RootStackParamList>;
 
 type ScanStatus = 'idle' | 'signing_in' | 'fetching' | 'parsing' | 'done' | 'error';
+type EmailProvider = 'gmail' | 'icloud' | null;
 
 export default function ScanEmailScreen() {
   const theme = useTheme();
@@ -46,31 +62,49 @@ export default function ScanEmailScreen() {
   const [detectedSubscriptions, setDetectedSubscriptions] = useState<DetectedSubscription[]>([]);
   const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
   const [userEmail, setUserEmail] = useState<string | null>(null);
+  const [icloudEmail, setIcloudEmail] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [activeProvider, setActiveProvider] = useState<EmailProvider>(null);
+  const [statusDetail, setStatusDetail] = useState<string | null>(null);
+
+  // iCloud credentials modal
+  const [showICloudModal, setShowICloudModal] = useState(false);
+  const [icloudCredentials, setIcloudCredentials] = useState<ICloudCredentials>({
+    email: '',
+    appPassword: '',
+  });
 
   useEffect(() => {
     configureGoogleSignIn();
     checkCurrentUser();
+    checkICloudCredentials();
   }, []);
 
   const checkCurrentUser = () => {
-    const user = getCurrentUser();
+    const user = getCurrentUser() as { data?: { user?: { email?: string } } } | null;
     if (user?.data?.user?.email) {
       setUserEmail(user.data.user.email);
     }
   };
 
-  const handleScan = async () => {
+  const checkICloudCredentials = () => {
+    const creds = getStoredICloudCredentials();
+    if (creds) {
+      setIcloudEmail(creds.email);
+    }
+  };
+
+  // Gmail Scan
+  const handleGmailScan = async () => {
+    setActiveProvider('gmail');
     setStatus('signing_in');
     setErrorMessage(null);
     setDetectedSubscriptions([]);
 
     try {
-      // 1. Sign in with Google
       const { accessToken, user } = await signInWithGoogle();
       setUserEmail(user?.email || null);
 
-      // 2. Fetch subscription-related emails
       setStatus('fetching');
       const messages = await fetchSubscriptionEmails(accessToken);
 
@@ -80,7 +114,6 @@ export default function ScanEmailScreen() {
         return;
       }
 
-      // 3. Fetch email details
       setProgress({ current: 0, total: messages.length });
       const messageIds = messages.slice(0, 50).map((m) => m.id);
       const emailDetails = await fetchMultipleEmailDetails(
@@ -89,11 +122,9 @@ export default function ScanEmailScreen() {
         (current, total) => setProgress({ current, total }),
       );
 
-      // 4. Parse emails for subscriptions
       setStatus('parsing');
       const detected = parseMultipleEmails(emailDetails);
 
-      // Filter out already registered subscriptions
       const existingNames = new Set(subscriptions.map((s) => s.name.toLowerCase()));
       const newSubscriptions = detected.filter(
         (d) => !existingNames.has(d.name.toLowerCase()),
@@ -107,17 +138,103 @@ export default function ScanEmailScreen() {
         Alert.alert('結果', '検出されたサブスクはすべて登録済みです');
       }
     } catch (error: any) {
-      console.error('Scan error:', error);
+      console.error('Gmail scan error:', error);
       setStatus('error');
       setErrorMessage(error.message || 'スキャン中にエラーが発生しました');
     }
   };
 
-  const handleSignOut = async () => {
+  // iCloud Scan
+  const handleICloudScan = async () => {
+    const storedCreds = getStoredICloudCredentials();
+    if (!storedCreds) {
+      setShowICloudModal(true);
+      return;
+    }
+
+    await performICloudScan(storedCreds);
+  };
+
+  const performICloudScan = async (credentials: ICloudCredentials) => {
+    setActiveProvider('icloud');
+    setStatus('fetching');
+    setErrorMessage(null);
+    setStatusDetail(null);
+    setDetectedSubscriptions([]);
+    setShowICloudModal(false);
+
+    try {
+      setProgress({ current: 0, total: 0 });
+      const emails = await fetchICloudSubscriptionEmails(
+        credentials,
+        (current, total) => setProgress({ current, total }),
+        (icloudStatus: ICloudStatus, detail?: string) => {
+          console.log('iCloud status:', icloudStatus, detail);
+          setStatusDetail(detail || null);
+        },
+      );
+
+      if (emails.length === 0) {
+        setStatus('done');
+        Alert.alert('結果', 'サブスク関連のメールが見つかりませんでした');
+        return;
+      }
+
+      setStatus('parsing');
+      const genericEmails = emails.map(convertToGenericFormat);
+      const detected = parseMultipleGenericEmails(genericEmails);
+
+      const existingNames = new Set(subscriptions.map((s) => s.name.toLowerCase()));
+      const newSubscriptions = detected.filter(
+        (d) => !existingNames.has(d.name.toLowerCase()),
+      );
+
+      setDetectedSubscriptions(newSubscriptions);
+      setSelectedItems(new Set(newSubscriptions.map((s) => s.name)));
+      setStatus('done');
+
+      if (newSubscriptions.length === 0 && detected.length > 0) {
+        Alert.alert('結果', '検出されたサブスクはすべて登録済みです');
+      }
+    } catch (error: any) {
+      console.error('iCloud scan error:', error);
+      setStatus('error');
+      setErrorMessage(error.message || 'iCloudスキャン中にエラーが発生しました');
+    }
+  };
+
+  const handleICloudModalSubmit = async () => {
+    if (!icloudCredentials.email || !icloudCredentials.appPassword) {
+      Alert.alert('エラー', 'メールアドレスとアプリ用パスワードを入力してください');
+      return;
+    }
+    // Save credentials immediately so user doesn't have to re-enter
+    storeICloudCredentials(icloudCredentials);
+    setIcloudEmail(icloudCredentials.email);
+    await performICloudScan(icloudCredentials);
+  };
+
+  const handleGmailSignOut = async () => {
     await signOutGoogle();
     setUserEmail(null);
     setDetectedSubscriptions([]);
     setStatus('idle');
+    setActiveProvider(null);
+  };
+
+  const handleICloudSignOut = () => {
+    clearICloudCredentials();
+    setIcloudEmail(null);
+    setIcloudCredentials({ email: '', appPassword: '' });
+    if (activeProvider === 'icloud') {
+      setDetectedSubscriptions([]);
+      setStatus('idle');
+      setActiveProvider(null);
+    }
+  };
+
+  const openICloudHelp = () => {
+    Linking.openURL('https://support.apple.com/ja-jp/102654');
   };
 
   const toggleSelection = (name: string) => {
@@ -187,7 +304,9 @@ export default function ScanEmailScreen() {
           <View style={styles.statusContainer}>
             <ActivityIndicator size="large" color={theme.colors.primary} />
             <Text style={styles.statusText}>
-              メールを取得中... ({progress.current}/{progress.total})
+              {progress.total > 0
+                ? `メールを取得中... (${progress.current}/${progress.total})`
+                : statusDetail || 'メールを検索中...'}
             </Text>
           </View>
         );
@@ -203,7 +322,10 @@ export default function ScanEmailScreen() {
           <View style={styles.statusContainer}>
             <Icon name="alert-circle" size={48} color={theme.colors.error} />
             <Text style={styles.errorText}>{errorMessage}</Text>
-            <TouchableOpacity style={styles.retryButton} onPress={handleScan}>
+            <TouchableOpacity
+              style={styles.retryButton}
+              onPress={activeProvider === 'gmail' ? handleGmailScan : handleICloudScan}
+            >
               <Text style={styles.retryButtonText}>再試行</Text>
             </TouchableOpacity>
           </View>
@@ -213,15 +335,108 @@ export default function ScanEmailScreen() {
     }
   };
 
+  const renderICloudModal = () => (
+    <Modal
+      visible={showICloudModal}
+      animationType="slide"
+      transparent={true}
+      onRequestClose={() => setShowICloudModal(false)}
+    >
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        style={styles.modalOverlay}
+      >
+        <View style={styles.modalContent}>
+          <View style={styles.modalHeader}>
+            <Icon name="apple" size={32} color={theme.colors.text} />
+            <Text style={styles.modalTitle}>iCloud メール設定</Text>
+            <TouchableOpacity
+              style={styles.modalClose}
+              onPress={() => setShowICloudModal(false)}
+            >
+              <Icon name="close" size={24} color={theme.colors.textSecondary} />
+            </TouchableOpacity>
+          </View>
+
+          <Text style={styles.modalDescription}>
+            iCloudメールにアクセスするには、Apple IDのアプリ用パスワードが必要です。
+          </Text>
+
+          <TouchableOpacity style={styles.helpLink} onPress={openICloudHelp}>
+            <Icon name="help-circle" size={18} color={theme.colors.primary} />
+            <Text style={styles.helpLinkText}>アプリ用パスワードの作成方法</Text>
+          </TouchableOpacity>
+
+          <View style={styles.inputGroup}>
+            <Text style={styles.inputLabel}>iCloudメールアドレス</Text>
+            <TextInput
+              style={styles.input}
+              placeholder="example@icloud.com"
+              placeholderTextColor={theme.colors.textSecondary}
+              value={icloudCredentials.email}
+              onChangeText={(text) =>
+                setIcloudCredentials((prev) => ({ ...prev, email: text }))
+              }
+              keyboardType="email-address"
+              autoCapitalize="none"
+              autoCorrect={false}
+            />
+          </View>
+
+          <View style={styles.inputGroup}>
+            <Text style={styles.inputLabel}>アプリ用パスワード</Text>
+            <TextInput
+              style={styles.input}
+              placeholder="xxxx-xxxx-xxxx-xxxx"
+              placeholderTextColor={theme.colors.textSecondary}
+              value={icloudCredentials.appPassword}
+              onChangeText={(text) =>
+                setIcloudCredentials((prev) => ({ ...prev, appPassword: text }))
+              }
+              secureTextEntry={true}
+              autoCapitalize="none"
+              autoCorrect={false}
+            />
+          </View>
+
+          <View style={styles.modalNote}>
+            <Icon name="shield-check" size={16} color={theme.colors.success} />
+            <Text style={styles.modalNoteText}>
+              パスワードは端末内にのみ保存され、外部に送信されません
+            </Text>
+          </View>
+
+          <TouchableOpacity
+            style={styles.modalButton}
+            onPress={handleICloudModalSubmit}
+          >
+            <Text style={styles.modalButtonText}>接続してスキャン</Text>
+          </TouchableOpacity>
+        </View>
+      </KeyboardAvoidingView>
+    </Modal>
+  );
+
   return (
     <View style={styles.container}>
       <ScrollView style={styles.scrollView}>
-        {/* User Info */}
+        {/* Gmail User Info */}
         {userEmail && (
           <View style={styles.userCard}>
             <Icon name="google" size={24} color="#4285F4" />
             <Text style={styles.userEmail}>{userEmail}</Text>
-            <TouchableOpacity onPress={handleSignOut}>
+            <TouchableOpacity onPress={handleGmailSignOut}>
+              <Icon name="logout" size={20} color={theme.colors.textSecondary} />
+            </TouchableOpacity>
+          </View>
+        )}
+
+        {/* iCloud User Info */}
+        {icloudEmail && (
+          <View style={styles.userCard}>
+            <Icon name="apple" size={24} color={theme.colors.text} />
+            <Text style={styles.userEmail}>{icloudEmail}</Text>
+            <TouchableOpacity onPress={handleICloudSignOut}>
               <Icon name="logout" size={20} color={theme.colors.textSecondary} />
             </TouchableOpacity>
           </View>
@@ -232,21 +447,38 @@ export default function ScanEmailScreen() {
           <Icon name="email-search" size={32} color={theme.colors.primary} />
           <Text style={styles.descriptionTitle}>メールからサブスクを検出</Text>
           <Text style={styles.descriptionText}>
-            Gmailに届いている領収書や請求書から、登録中のサブスクリプションを自動で検出します。
+            メールに届いている領収書や請求書から、登録中のサブスクリプションを自動で検出します。
           </Text>
         </View>
 
         {/* Status */}
         {renderStatus()}
 
-        {/* Scan Button */}
+        {/* Scan Buttons */}
         {(status === 'idle' || status === 'done') && (
-          <TouchableOpacity style={styles.scanButton} onPress={handleScan}>
-            <Icon name="magnify" size={24} color="#FFFFFF" />
-            <Text style={styles.scanButtonText}>
-              {userEmail ? 'メールをスキャン' : 'Googleでログインしてスキャン'}
-            </Text>
-          </TouchableOpacity>
+          <View style={styles.scanButtonsContainer}>
+            {/* Gmail Button */}
+            <TouchableOpacity
+              style={[styles.scanButton, styles.gmailButton]}
+              onPress={handleGmailScan}
+            >
+              <Icon name="google" size={24} color="#FFFFFF" />
+              <Text style={styles.scanButtonText}>
+                {userEmail ? 'Gmailをスキャン' : 'Gmailでスキャン'}
+              </Text>
+            </TouchableOpacity>
+
+            {/* iCloud Button */}
+            <TouchableOpacity
+              style={[styles.scanButton, styles.icloudButton]}
+              onPress={handleICloudScan}
+            >
+              <Icon name="apple" size={24} color="#FFFFFF" />
+              <Text style={styles.scanButtonText}>
+                {icloudEmail ? 'iCloudをスキャン' : 'iCloudでスキャン'}
+              </Text>
+            </TouchableOpacity>
+          </View>
         )}
 
         {/* Results */}
@@ -315,6 +547,9 @@ export default function ScanEmailScreen() {
           </TouchableOpacity>
         </View>
       )}
+
+      {/* iCloud Credentials Modal */}
+      {renderICloudModal()}
     </View>
   );
 }
@@ -373,6 +608,12 @@ const createStyles = (theme: ReturnType<typeof useTheme>) =>
       color: theme.colors.textSecondary,
       marginTop: 16,
     },
+    statusDetailText: {
+      fontSize: 14,
+      color: theme.colors.textSecondary,
+      marginTop: 8,
+      opacity: 0.7,
+    },
     errorText: {
       fontSize: 14,
       color: theme.colors.error,
@@ -391,15 +632,23 @@ const createStyles = (theme: ReturnType<typeof useTheme>) =>
       fontSize: 14,
       fontWeight: '600',
     },
+    scanButtonsContainer: {
+      paddingHorizontal: 16,
+      gap: 12,
+    },
     scanButton: {
       flexDirection: 'row',
       alignItems: 'center',
       justifyContent: 'center',
-      backgroundColor: theme.colors.primary,
-      marginHorizontal: 16,
       padding: 16,
       borderRadius: 12,
       gap: 8,
+    },
+    gmailButton: {
+      backgroundColor: '#4285F4',
+    },
+    icloudButton: {
+      backgroundColor: '#333333',
     },
     scanButtonText: {
       color: '#FFFFFF',
@@ -481,6 +730,93 @@ const createStyles = (theme: ReturnType<typeof useTheme>) =>
       gap: 8,
     },
     addButtonText: {
+      color: '#FFFFFF',
+      fontSize: 16,
+      fontWeight: '600',
+    },
+    // Modal styles
+    modalOverlay: {
+      flex: 1,
+      backgroundColor: 'rgba(0, 0, 0, 0.5)',
+      justifyContent: 'flex-end',
+    },
+    modalContent: {
+      backgroundColor: theme.colors.surface,
+      borderTopLeftRadius: 24,
+      borderTopRightRadius: 24,
+      padding: 24,
+      paddingBottom: 40,
+    },
+    modalHeader: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      marginBottom: 16,
+    },
+    modalTitle: {
+      fontSize: 20,
+      fontWeight: '600',
+      color: theme.colors.text,
+      marginLeft: 12,
+      flex: 1,
+    },
+    modalClose: {
+      padding: 4,
+    },
+    modalDescription: {
+      fontSize: 14,
+      color: theme.colors.textSecondary,
+      lineHeight: 20,
+      marginBottom: 12,
+    },
+    helpLink: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      marginBottom: 20,
+      gap: 6,
+    },
+    helpLinkText: {
+      fontSize: 14,
+      color: theme.colors.primary,
+    },
+    inputGroup: {
+      marginBottom: 16,
+    },
+    inputLabel: {
+      fontSize: 14,
+      fontWeight: '500',
+      color: theme.colors.text,
+      marginBottom: 8,
+    },
+    input: {
+      backgroundColor: theme.colors.card,
+      borderRadius: 10,
+      padding: 14,
+      fontSize: 16,
+      color: theme.colors.text,
+      borderWidth: 1,
+      borderColor: theme.colors.border,
+    },
+    modalNote: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      backgroundColor: theme.colors.card,
+      padding: 12,
+      borderRadius: 8,
+      marginBottom: 20,
+      gap: 8,
+    },
+    modalNoteText: {
+      flex: 1,
+      fontSize: 12,
+      color: theme.colors.textSecondary,
+    },
+    modalButton: {
+      backgroundColor: '#333333',
+      padding: 16,
+      borderRadius: 12,
+      alignItems: 'center',
+    },
+    modalButtonText: {
       color: '#FFFFFF',
       fontSize: 16,
       fontWeight: '600',

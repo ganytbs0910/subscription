@@ -1,6 +1,9 @@
 import type { Category, BillingCycle } from '../types';
 import type { GmailMessageDetail } from './gmailService';
 
+// Declare global atob for TypeScript
+declare const atob: (data: string) => string;
+
 export interface DetectedSubscription {
   name: string;
   category: Category;
@@ -146,7 +149,7 @@ const decodeBase64 = (data: string): string => {
     return decodeURIComponent(
       atob(base64)
         .split('')
-        .map(c => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2))
+        .map((c: string) => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2))
         .join(''),
     );
   } catch {
@@ -245,6 +248,66 @@ export const parseMultipleEmails = (
 
   for (const email of emails) {
     const subscription = parseEmailForSubscription(email);
+    if (subscription && !seenServices.has(subscription.name)) {
+      seenServices.add(subscription.name);
+      detected.push(subscription);
+    }
+  }
+
+  // 信頼度で降順ソート
+  return detected.sort((a, b) => b.confidence - a.confidence);
+};
+
+// Generic email interface for iCloud and other email providers
+export interface GenericEmail {
+  id: string;
+  subject: string;
+  from: string;
+  body: string;
+  snippet: string;
+  date: string;
+}
+
+export const parseGenericEmailForSubscription = (
+  email: GenericEmail,
+): DetectedSubscription | null => {
+  const fullText = `${email.subject} ${email.from} ${email.body} ${email.snippet}`;
+
+  for (const service of SERVICE_PATTERNS) {
+    if (service.pattern.test(fullText)) {
+      const priceInfo = extractPrice(fullText);
+      const billingCycle = extractBillingCycle(fullText);
+
+      // 信頼度を計算
+      let confidence = 0.5;
+      if (priceInfo) confidence += 0.2;
+      if (billingCycle) confidence += 0.15;
+      if (/receipt|invoice|領収|請求|支払/i.test(email.subject)) confidence += 0.15;
+
+      return {
+        name: service.name,
+        category: service.category,
+        price: priceInfo?.price || null,
+        currency: priceInfo?.currency || 'JPY',
+        billingCycle,
+        email: email.from,
+        detectedDate: email.date || new Date().toISOString(),
+        confidence,
+      };
+    }
+  }
+
+  return null;
+};
+
+export const parseMultipleGenericEmails = (
+  emails: GenericEmail[],
+): DetectedSubscription[] => {
+  const detected: DetectedSubscription[] = [];
+  const seenServices = new Set<string>();
+
+  for (const email of emails) {
+    const subscription = parseGenericEmailForSubscription(email);
     if (subscription && !seenServices.has(subscription.name)) {
       seenServices.add(subscription.name);
       detected.push(subscription);
