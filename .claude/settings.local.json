@@ -10,7 +10,15 @@
       "Bash(xcrun simctl list:*)",
       "Bash(lsof:*)",
       "Bash(xargs kill:*)",
-      "Bash(git push:*)"
+      "Bash(git push:*)",
+      "Bash(npm run ios:*)",
+      "Bash(tree:*)",
+      "WebSearch",
+      "Bash(npm install:*)",
+      "Bash(pod install)",
+      "Bash(npx tsc:*)",
+      "Bash(npx react-native:*)",
+      "Bash(grep:*)"
     ]
   }
 }
