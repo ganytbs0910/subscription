@@ -18,7 +18,13 @@
       "Bash(pod install)",
       "Bash(npx tsc:*)",
       "Bash(npx react-native:*)",
-      "Bash(grep:*)"
+      "Bash(grep:*)",
+      "Bash(npm view:*)",
+      "Bash(xcodebuild:*)",
+      "Bash(curl:*)",
+      "Bash(xcrun simctl terminate:*)",
+      "Bash(xcrun simctl launch:*)",
+      "Bash(xcrun simctl spawn:*)"
     ]
   }
 }

@@ -24,8 +24,11 @@ export const signInWithGoogle = async () => {
     const response = await GoogleSignin.signIn();
     const tokens = await GoogleSignin.getTokens();
 
+    // Handle different API response shapes across versions
+    const user = (response as any).data?.user || (response as any).user || response;
+
     return {
-      user: response.data?.user,
+      user,
       accessToken: tokens.accessToken,
     };
   } catch (error: any) {
