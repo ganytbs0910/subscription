@@ -13,6 +13,8 @@ export interface Theme {
     border: string;
     error: string;
     success: string;
+    warning: string;
+    info: string;
   };
 }
 
@@ -28,6 +30,8 @@ const lightTheme: Theme = {
     border: '#E5E5EA',
     error: '#FF3B30',
     success: '#34C759',
+    warning: '#FF9500',
+    info: '#5856D6',
   },
 };
 
@@ -43,6 +47,8 @@ const darkTheme: Theme = {
     border: '#38383A',
     error: '#FF453A',
     success: '#32D74B',
+    warning: '#FF9F0A',
+    info: '#5E5CE6',
   },
 };
 

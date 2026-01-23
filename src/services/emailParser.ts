@@ -1,6 +1,15 @@
 import type { Category, BillingCycle } from '../types';
 import type { GmailMessageDetail } from './gmailService';
 
+// 汎用メールインターフェース（Gmail/iCloud両対応）
+export interface GenericEmail {
+  subject: string;
+  from: string;
+  body: string;
+  date: string;
+  snippet?: string;
+}
+
 export interface DetectedSubscription {
   name: string;
   category: Category;
@@ -252,5 +261,68 @@ export const parseMultipleEmails = (
   }
 
   // 信頼度で降順ソート
+  return detected.sort((a, b) => b.confidence - a.confidence);
+};
+
+// GmailMessageDetailをGenericEmailに変換
+export const convertGmailToGeneric = (
+  email: GmailMessageDetail,
+): GenericEmail => {
+  return {
+    subject: extractHeader(email, 'Subject'),
+    from: extractHeader(email, 'From'),
+    body: extractBody(email),
+    date: extractHeader(email, 'Date') || new Date().toISOString(),
+    snippet: email.snippet,
+  };
+};
+
+// 汎用メールからサブスク検出
+export const parseGenericEmailForSubscription = (
+  email: GenericEmail,
+): DetectedSubscription | null => {
+  const fullText = `${email.subject} ${email.from} ${email.body} ${email.snippet || ''}`;
+
+  for (const service of SERVICE_PATTERNS) {
+    if (service.pattern.test(fullText)) {
+      const priceInfo = extractPrice(fullText);
+      const billingCycle = extractBillingCycle(fullText);
+
+      let confidence = 0.5;
+      if (priceInfo) confidence += 0.2;
+      if (billingCycle) confidence += 0.15;
+      if (/receipt|invoice|領収|請求|支払/i.test(email.subject)) confidence += 0.15;
+
+      return {
+        name: service.name,
+        category: service.category,
+        price: priceInfo?.price || null,
+        currency: priceInfo?.currency || 'JPY',
+        billingCycle,
+        email: email.from,
+        detectedDate: email.date,
+        confidence,
+      };
+    }
+  }
+
+  return null;
+};
+
+// 汎用メール配列からサブスク検出
+export const parseMultipleGenericEmails = (
+  emails: GenericEmail[],
+): DetectedSubscription[] => {
+  const detected: DetectedSubscription[] = [];
+  const seenServices = new Set<string>();
+
+  for (const email of emails) {
+    const subscription = parseGenericEmailForSubscription(email);
+    if (subscription && !seenServices.has(subscription.name)) {
+      seenServices.add(subscription.name);
+      detected.push(subscription);
+    }
+  }
+
   return detected.sort((a, b) => b.confidence - a.confidence);
 };

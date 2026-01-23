@@ -15,6 +15,8 @@ import { useSubscriptionStore } from '../../stores/subscriptionStore';
 import {
   calculateTotalMonthly,
   calculateTotalYearly,
+  calculateTotalPaidSinceStart,
+  calculateNextMonthPayments,
   formatPrice,
   getUpcomingSubscriptions,
   getDaysUntilNextBilling,
@@ -33,6 +35,8 @@ export default function DashboardScreen() {
   const activeSubscriptions = subscriptions.filter((sub) => sub.isActive);
   const monthlyTotal = calculateTotalMonthly(activeSubscriptions);
   const yearlyTotal = calculateTotalYearly(activeSubscriptions);
+  const totalPaid = calculateTotalPaidSinceStart(activeSubscriptions);
+  const nextMonthData = calculateNextMonthPayments(activeSubscriptions);
   const upcomingPayments = getUpcomingSubscriptions(activeSubscriptions, 14);
 
   const styles = createStyles(theme);
@@ -58,12 +62,38 @@ export default function DashboardScreen() {
         <View style={styles.statCard}>
           <Icon name="check-circle" size={24} color={theme.colors.success} />
           <Text style={styles.statNumber}>{activeSubscriptions.length}</Text>
-          <Text style={styles.statLabel}>有効</Text>
+          <Text style={styles.statLabel}>契約中</Text>
         </View>
         <View style={styles.statCard}>
           <Icon name="calendar-clock" size={24} color={theme.colors.primary} />
           <Text style={styles.statNumber}>{upcomingPayments.length}</Text>
           <Text style={styles.statLabel}>2週間以内</Text>
+        </View>
+      </View>
+
+      <View style={styles.paymentSummaryContainer}>
+        <View style={styles.paymentSummaryCard}>
+          <View style={styles.paymentSummaryHeader}>
+            <Icon name="history" size={20} color={theme.colors.warning} />
+            <Text style={styles.paymentSummaryTitle}>累計支払い額</Text>
+          </View>
+          <Text style={styles.paymentSummaryAmount}>
+            {formatPrice(totalPaid, settings.currency)}
+          </Text>
+          <Text style={styles.paymentSummarySubtext}>契約開始からの合計</Text>
+        </View>
+
+        <View style={styles.paymentSummaryCard}>
+          <View style={styles.paymentSummaryHeader}>
+            <Icon name="calendar-month" size={20} color={theme.colors.info} />
+            <Text style={styles.paymentSummaryTitle}>来月の支払い</Text>
+          </View>
+          <Text style={styles.paymentSummaryAmount}>
+            {formatPrice(nextMonthData.total, settings.currency)}
+          </Text>
+          <Text style={styles.paymentSummarySubtext}>
+            {nextMonthData.subscriptions.length}件のサブスク
+          </Text>
         </View>
       </View>
 
@@ -204,6 +234,39 @@ const createStyles = (theme: ReturnType<typeof useTheme>) =>
       fontSize: 12,
       color: theme.colors.textSecondary,
       marginTop: 4,
+    },
+    paymentSummaryContainer: {
+      flexDirection: 'row',
+      paddingHorizontal: 16,
+      gap: 12,
+      marginBottom: 16,
+    },
+    paymentSummaryCard: {
+      flex: 1,
+      backgroundColor: theme.colors.card,
+      borderRadius: 12,
+      padding: 16,
+    },
+    paymentSummaryHeader: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+      marginBottom: 12,
+    },
+    paymentSummaryTitle: {
+      fontSize: 14,
+      fontWeight: '600',
+      color: theme.colors.textSecondary,
+    },
+    paymentSummaryAmount: {
+      fontSize: 22,
+      fontWeight: '700',
+      color: theme.colors.text,
+      marginBottom: 4,
+    },
+    paymentSummarySubtext: {
+      fontSize: 12,
+      color: theme.colors.textSecondary,
     },
     section: {
       padding: 16,

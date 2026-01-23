@@ -7,6 +7,8 @@ import {
   TouchableOpacity,
   ActivityIndicator,
   Alert,
+  TextInput,
+  Linking,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -28,25 +30,37 @@ import {
   parseMultipleEmails,
   DetectedSubscription,
 } from '../../services/emailParser';
+import {
+  testICloudConnection,
+  fetchICloudSubscriptions,
+  ICloudCredentials,
+} from '../../services/icloudService';
 import { getCategoryLabel } from '../../utils/presets';
 import { formatPrice } from '../../utils/calculations';
 import type { RootStackParamList, BillingCycle } from '../../types';
 
 type NavigationProp = NativeStackNavigationProp<RootStackParamList>;
 
-type ScanStatus = 'idle' | 'signing_in' | 'fetching' | 'parsing' | 'done' | 'error';
+type EmailProvider = 'gmail' | 'icloud';
+type ScanStatus = 'idle' | 'signing_in' | 'connecting' | 'fetching' | 'parsing' | 'done' | 'error';
 
 export default function ScanEmailScreen() {
   const theme = useTheme();
   const navigation = useNavigation<NavigationProp>();
   const { addSubscription, subscriptions } = useSubscriptionStore();
 
+  const [provider, setProvider] = useState<EmailProvider | null>(null);
   const [status, setStatus] = useState<ScanStatus>('idle');
   const [progress, setProgress] = useState({ current: 0, total: 0 });
   const [detectedSubscriptions, setDetectedSubscriptions] = useState<DetectedSubscription[]>([]);
   const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
   const [userEmail, setUserEmail] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  // iCloud credentials
+  const [icloudEmail, setIcloudEmail] = useState('');
+  const [icloudAppPassword, setIcloudAppPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
 
   useEffect(() => {
     configureGoogleSignIn();
@@ -57,20 +71,19 @@ export default function ScanEmailScreen() {
     const user = getCurrentUser();
     if (user?.data?.user?.email) {
       setUserEmail(user.data.user.email);
+      setProvider('gmail');
     }
   };
 
-  const handleScan = async () => {
+  const handleGmailScan = async () => {
     setStatus('signing_in');
     setErrorMessage(null);
     setDetectedSubscriptions([]);
 
     try {
-      // 1. Sign in with Google
       const { accessToken, user } = await signInWithGoogle();
       setUserEmail(user?.email || null);
 
-      // 2. Fetch subscription-related emails
       setStatus('fetching');
       const messages = await fetchSubscriptionEmails(accessToken);
 
@@ -80,7 +93,6 @@ export default function ScanEmailScreen() {
         return;
       }
 
-      // 3. Fetch email details
       setProgress({ current: 0, total: messages.length });
       const messageIds = messages.slice(0, 50).map((m) => m.id);
       const emailDetails = await fetchMultipleEmailDetails(
@@ -89,11 +101,9 @@ export default function ScanEmailScreen() {
         (current, total) => setProgress({ current, total }),
       );
 
-      // 4. Parse emails for subscriptions
       setStatus('parsing');
       const detected = parseMultipleEmails(emailDetails);
 
-      // Filter out already registered subscriptions
       const existingNames = new Set(subscriptions.map((s) => s.name.toLowerCase()));
       const newSubscriptions = detected.filter(
         (d) => !existingNames.has(d.name.toLowerCase()),
@@ -107,17 +117,79 @@ export default function ScanEmailScreen() {
         Alert.alert('結果', '検出されたサブスクはすべて登録済みです');
       }
     } catch (error: any) {
-      console.error('Scan error:', error);
+      console.error('Gmail scan error:', error);
+      setStatus('error');
+      setErrorMessage(error.message || 'スキャン中にエラーが発生しました');
+    }
+  };
+
+  const handleICloudScan = async () => {
+    if (!icloudEmail.trim() || !icloudAppPassword.trim()) {
+      Alert.alert('エラー', 'メールアドレスとApp専用パスワードを入力してください');
+      return;
+    }
+
+    const credentials: ICloudCredentials = {
+      email: icloudEmail.trim(),
+      appPassword: icloudAppPassword.trim(),
+    };
+
+    setStatus('connecting');
+    setErrorMessage(null);
+    setDetectedSubscriptions([]);
+
+    try {
+      // Test connection first
+      const testResult = await testICloudConnection(credentials);
+      if (!testResult.success) {
+        setStatus('error');
+        setErrorMessage(testResult.error || '接続に失敗しました');
+        return;
+      }
+
+      setUserEmail(icloudEmail);
+      setStatus('fetching');
+
+      // Fetch subscriptions
+      const result = await fetchICloudSubscriptions(credentials, 50);
+
+      if (!result.success) {
+        setStatus('error');
+        setErrorMessage(result.error || 'メール取得に失敗しました');
+        return;
+      }
+
+      const existingNames = new Set(subscriptions.map((s) => s.name.toLowerCase()));
+      const newSubscriptions = result.subscriptions.filter(
+        (d) => !existingNames.has(d.name.toLowerCase()),
+      );
+
+      setDetectedSubscriptions(newSubscriptions);
+      setSelectedItems(new Set(newSubscriptions.map((s) => s.name)));
+      setStatus('done');
+
+      if (newSubscriptions.length === 0 && result.totalFound > 0) {
+        Alert.alert('結果', '検出されたサブスクはすべて登録済みです');
+      } else if (result.totalFound === 0) {
+        Alert.alert('結果', 'サブスク関連のメールが見つかりませんでした');
+      }
+    } catch (error: any) {
+      console.error('iCloud scan error:', error);
       setStatus('error');
       setErrorMessage(error.message || 'スキャン中にエラーが発生しました');
     }
   };
 
   const handleSignOut = async () => {
-    await signOutGoogle();
+    if (provider === 'gmail') {
+      await signOutGoogle();
+    }
     setUserEmail(null);
     setDetectedSubscriptions([]);
     setStatus('idle');
+    setProvider(null);
+    setIcloudEmail('');
+    setIcloudAppPassword('');
   };
 
   const toggleSelection = (name: string) => {
@@ -171,7 +243,90 @@ export default function ScanEmailScreen() {
     }
   };
 
+  const openAppPasswordHelp = () => {
+    Linking.openURL('https://support.apple.com/ja-jp/102654');
+  };
+
   const styles = createStyles(theme);
+
+  const renderProviderSelection = () => (
+    <View style={styles.providerSection}>
+      <Text style={styles.sectionTitle}>メールプロバイダーを選択</Text>
+
+      <TouchableOpacity
+        style={[styles.providerCard, provider === 'gmail' && styles.providerCardSelected]}
+        onPress={() => setProvider('gmail')}
+      >
+        <Icon name="google" size={32} color="#4285F4" />
+        <View style={styles.providerInfo}>
+          <Text style={styles.providerName}>Gmail</Text>
+          <Text style={styles.providerDesc}>Googleアカウントでログイン</Text>
+        </View>
+        {provider === 'gmail' && (
+          <Icon name="check-circle" size={24} color={theme.colors.primary} />
+        )}
+      </TouchableOpacity>
+
+      <TouchableOpacity
+        style={[styles.providerCard, provider === 'icloud' && styles.providerCardSelected]}
+        onPress={() => setProvider('icloud')}
+      >
+        <Icon name="apple" size={32} color={theme.colors.text} />
+        <View style={styles.providerInfo}>
+          <Text style={styles.providerName}>iCloud Mail</Text>
+          <Text style={styles.providerDesc}>App専用パスワードが必要</Text>
+        </View>
+        {provider === 'icloud' && (
+          <Icon name="check-circle" size={24} color={theme.colors.primary} />
+        )}
+      </TouchableOpacity>
+    </View>
+  );
+
+  const renderICloudForm = () => (
+    <View style={styles.formSection}>
+      <Text style={styles.formLabel}>iCloudメールアドレス</Text>
+      <TextInput
+        style={styles.input}
+        placeholder="example@icloud.com"
+        placeholderTextColor={theme.colors.textSecondary}
+        value={icloudEmail}
+        onChangeText={setIcloudEmail}
+        keyboardType="email-address"
+        autoCapitalize="none"
+        autoCorrect={false}
+      />
+
+      <Text style={styles.formLabel}>App専用パスワード</Text>
+      <View style={styles.passwordContainer}>
+        <TextInput
+          style={[styles.input, styles.passwordInput]}
+          placeholder="xxxx-xxxx-xxxx-xxxx"
+          placeholderTextColor={theme.colors.textSecondary}
+          value={icloudAppPassword}
+          onChangeText={setIcloudAppPassword}
+          secureTextEntry={!showPassword}
+          autoCapitalize="none"
+          autoCorrect={false}
+        />
+        <TouchableOpacity
+          style={styles.passwordToggle}
+          onPress={() => setShowPassword(!showPassword)}
+        >
+          <Icon
+            name={showPassword ? 'eye-off' : 'eye'}
+            size={24}
+            color={theme.colors.textSecondary}
+          />
+        </TouchableOpacity>
+      </View>
+
+      <TouchableOpacity style={styles.helpLink} onPress={openAppPasswordHelp}>
+        <Icon name="help-circle-outline" size={16} color={theme.colors.primary} />
+        <Text style={styles.helpLinkText}>App専用パスワードの作成方法</Text>
+      </TouchableOpacity>
+    </View>
+  );
 
   const renderStatus = () => {
     switch (status) {
@@ -182,12 +337,20 @@ export default function ScanEmailScreen() {
             <Text style={styles.statusText}>Googleにログイン中...</Text>
           </View>
         );
+      case 'connecting':
+        return (
+          <View style={styles.statusContainer}>
+            <ActivityIndicator size="large" color={theme.colors.primary} />
+            <Text style={styles.statusText}>iCloudに接続中...</Text>
+          </View>
+        );
       case 'fetching':
         return (
           <View style={styles.statusContainer}>
             <ActivityIndicator size="large" color={theme.colors.primary} />
             <Text style={styles.statusText}>
-              メールを取得中... ({progress.current}/{progress.total})
+              メールを取得中...
+              {progress.total > 0 && ` (${progress.current}/${progress.total})`}
             </Text>
           </View>
         );
@@ -203,7 +366,10 @@ export default function ScanEmailScreen() {
           <View style={styles.statusContainer}>
             <Icon name="alert-circle" size={48} color={theme.colors.error} />
             <Text style={styles.errorText}>{errorMessage}</Text>
-            <TouchableOpacity style={styles.retryButton} onPress={handleScan}>
+            <TouchableOpacity
+              style={styles.retryButton}
+              onPress={provider === 'gmail' ? handleGmailScan : handleICloudScan}
+            >
               <Text style={styles.retryButtonText}>再試行</Text>
             </TouchableOpacity>
           </View>
@@ -219,7 +385,11 @@ export default function ScanEmailScreen() {
         {/* User Info */}
         {userEmail && (
           <View style={styles.userCard}>
-            <Icon name="google" size={24} color="#4285F4" />
+            <Icon
+              name={provider === 'gmail' ? 'google' : 'apple'}
+              size={24}
+              color={provider === 'gmail' ? '#4285F4' : theme.colors.text}
+            />
             <Text style={styles.userEmail}>{userEmail}</Text>
             <TouchableOpacity onPress={handleSignOut}>
               <Icon name="logout" size={20} color={theme.colors.textSecondary} />
@@ -232,20 +402,39 @@ export default function ScanEmailScreen() {
           <Icon name="email-search" size={32} color={theme.colors.primary} />
           <Text style={styles.descriptionTitle}>メールからサブスクを検出</Text>
           <Text style={styles.descriptionText}>
-            Gmailに届いている領収書や請求書から、登録中のサブスクリプションを自動で検出します。
+            メールに届いている領収書や請求書から、登録中のサブスクリプションを自動で検出します。
           </Text>
         </View>
+
+        {/* Provider Selection */}
+        {!userEmail && status === 'idle' && renderProviderSelection()}
+
+        {/* iCloud Form */}
+        {provider === 'icloud' && !userEmail && status === 'idle' && renderICloudForm()}
 
         {/* Status */}
         {renderStatus()}
 
         {/* Scan Button */}
-        {(status === 'idle' || status === 'done') && (
-          <TouchableOpacity style={styles.scanButton} onPress={handleScan}>
+        {provider && (status === 'idle' || status === 'done') && !userEmail && (
+          <TouchableOpacity
+            style={styles.scanButton}
+            onPress={provider === 'gmail' ? handleGmailScan : handleICloudScan}
+          >
             <Icon name="magnify" size={24} color="#FFFFFF" />
             <Text style={styles.scanButtonText}>
-              {userEmail ? 'メールをスキャン' : 'Googleでログインしてスキャン'}
+              {provider === 'gmail' ? 'Googleでログインしてスキャン' : 'iCloudメールをスキャン'}
             </Text>
+          </TouchableOpacity>
+        )}
+
+        {userEmail && (status === 'idle' || status === 'done') && (
+          <TouchableOpacity
+            style={styles.scanButton}
+            onPress={provider === 'gmail' ? handleGmailScan : handleICloudScan}
+          >
+            <Icon name="magnify" size={24} color="#FFFFFF" />
+            <Text style={styles.scanButtonText}>メールをスキャン</Text>
           </TouchableOpacity>
         )}
 
@@ -364,6 +553,83 @@ const createStyles = (theme: ReturnType<typeof useTheme>) =>
       textAlign: 'center',
       lineHeight: 20,
     },
+    providerSection: {
+      padding: 16,
+      paddingTop: 8,
+    },
+    sectionTitle: {
+      fontSize: 18,
+      fontWeight: '600',
+      color: theme.colors.text,
+      marginBottom: 12,
+    },
+    providerCard: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      backgroundColor: theme.colors.card,
+      borderRadius: 12,
+      padding: 16,
+      marginBottom: 12,
+      borderWidth: 2,
+      borderColor: 'transparent',
+    },
+    providerCardSelected: {
+      borderColor: theme.colors.primary,
+    },
+    providerInfo: {
+      flex: 1,
+      marginLeft: 16,
+    },
+    providerName: {
+      fontSize: 16,
+      fontWeight: '600',
+      color: theme.colors.text,
+    },
+    providerDesc: {
+      fontSize: 13,
+      color: theme.colors.textSecondary,
+      marginTop: 2,
+    },
+    formSection: {
+      padding: 16,
+      paddingTop: 0,
+    },
+    formLabel: {
+      fontSize: 14,
+      fontWeight: '600',
+      color: theme.colors.text,
+      marginBottom: 8,
+      marginTop: 12,
+    },
+    input: {
+      backgroundColor: theme.colors.card,
+      borderRadius: 12,
+      padding: 16,
+      fontSize: 16,
+      color: theme.colors.text,
+    },
+    passwordContainer: {
+      position: 'relative',
+    },
+    passwordInput: {
+      paddingRight: 50,
+    },
+    passwordToggle: {
+      position: 'absolute',
+      right: 12,
+      top: 12,
+      padding: 4,
+    },
+    helpLink: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      marginTop: 12,
+      gap: 6,
+    },
+    helpLinkText: {
+      fontSize: 13,
+      color: theme.colors.primary,
+    },
     statusContainer: {
       alignItems: 'center',
       padding: 32,
@@ -408,12 +674,6 @@ const createStyles = (theme: ReturnType<typeof useTheme>) =>
     },
     resultsSection: {
       padding: 16,
-    },
-    sectionTitle: {
-      fontSize: 18,
-      fontWeight: '600',
-      color: theme.colors.text,
-      marginBottom: 12,
     },
     resultCard: {
       flexDirection: 'row',

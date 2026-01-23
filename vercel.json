@@ -1,0 +1,7 @@
+{
+  "functions": {
+    "api/icloud/**/*.ts": {
+      "maxDuration": 60
+    }
+  }
+}

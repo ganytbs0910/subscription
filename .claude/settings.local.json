@@ -18,7 +18,15 @@
       "Bash(pod install)",
       "Bash(npx tsc:*)",
       "Bash(npx react-native:*)",
-      "Bash(grep:*)"
+      "Bash(grep:*)",
+      "Bash(git -C /Users/gan/Desktop/subscription log --oneline -10)",
+      "Bash(pod install:*)",
+      "Bash(pod update:*)",
+      "Bash(npx vercel dev:*)",
+      "Bash(npx vercel:*)",
+      "Bash(node:*)",
+      "Bash(npm start)",
+      "Bash(ipconfig getifaddr:*)"
     ]
   }
 }
