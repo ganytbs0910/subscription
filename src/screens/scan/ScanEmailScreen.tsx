@@ -13,9 +13,13 @@ import {
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
+import { MMKV } from 'react-native-mmkv';
 
 import { useTheme } from '../../hooks/useTheme';
 import { useSubscriptionStore } from '../../stores/subscriptionStore';
+
+// 認証情報保存用ストレージ
+const credentialsStorage = new MMKV({ id: 'credentials-storage' });
 import {
   configureGoogleSignIn,
   signInWithGoogle,
@@ -61,11 +65,36 @@ export default function ScanEmailScreen() {
   const [icloudEmail, setIcloudEmail] = useState('');
   const [icloudAppPassword, setIcloudAppPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
+  const [hasSavedCredentials, setHasSavedCredentials] = useState(false);
 
   useEffect(() => {
     configureGoogleSignIn();
     checkCurrentUser();
+    loadSavedCredentials();
   }, []);
+
+  const loadSavedCredentials = () => {
+    const savedEmail = credentialsStorage.getString('icloud_email');
+    const savedPassword = credentialsStorage.getString('icloud_password');
+    if (savedEmail && savedPassword) {
+      setIcloudEmail(savedEmail);
+      setIcloudAppPassword(savedPassword);
+      setHasSavedCredentials(true);
+      setProvider('icloud');
+    }
+  };
+
+  const saveCredentials = (email: string, password: string) => {
+    credentialsStorage.set('icloud_email', email);
+    credentialsStorage.set('icloud_password', password);
+    setHasSavedCredentials(true);
+  };
+
+  const clearSavedCredentials = () => {
+    credentialsStorage.delete('icloud_email');
+    credentialsStorage.delete('icloud_password');
+    setHasSavedCredentials(false);
+  };
 
   const checkCurrentUser = () => {
     const user = getCurrentUser();
@@ -85,7 +114,12 @@ export default function ScanEmailScreen() {
       setUserEmail(user?.email || null);
 
       setStatus('fetching');
-      const messages = await fetchSubscriptionEmails(accessToken);
+      // 全件取得（進捗表示付き）
+      const messages = await fetchSubscriptionEmails(
+        accessToken,
+        undefined, // 全件取得
+        (fetched) => setProgress({ current: fetched, total: 0 }), // 総数は不明なので0
+      );
 
       if (messages.length === 0) {
         setStatus('done');
@@ -93,8 +127,9 @@ export default function ScanEmailScreen() {
         return;
       }
 
+      // 全メールの詳細を取得
       setProgress({ current: 0, total: messages.length });
-      const messageIds = messages.slice(0, 50).map((m) => m.id);
+      const messageIds = messages.map((m) => m.id);
       const emailDetails = await fetchMultipleEmailDetails(
         accessToken,
         messageIds,
@@ -117,7 +152,6 @@ export default function ScanEmailScreen() {
         Alert.alert('結果', '検出されたサブスクはすべて登録済みです');
       }
     } catch (error: any) {
-      console.error('Gmail scan error:', error);
       setStatus('error');
       setErrorMessage(error.message || 'スキャン中にエラーが発生しました');
     }
@@ -150,8 +184,11 @@ export default function ScanEmailScreen() {
       setUserEmail(icloudEmail);
       setStatus('fetching');
 
+      // 認証成功したら保存
+      saveCredentials(credentials.email, credentials.appPassword);
+
       // Fetch subscriptions
-      const result = await fetchICloudSubscriptions(credentials, 50);
+      const result = await fetchICloudSubscriptions(credentials, 300);
 
       if (!result.success) {
         setStatus('error');
@@ -174,7 +211,6 @@ export default function ScanEmailScreen() {
         Alert.alert('結果', 'サブスク関連のメールが見つかりませんでした');
       }
     } catch (error: any) {
-      console.error('iCloud scan error:', error);
       setStatus('error');
       setErrorMessage(error.message || 'スキャン中にエラーが発生しました');
     }
@@ -183,6 +219,9 @@ export default function ScanEmailScreen() {
   const handleSignOut = async () => {
     if (provider === 'gmail') {
       await signOutGoogle();
+    }
+    if (provider === 'icloud') {
+      clearSavedCredentials();
     }
     setUserEmail(null);
     setDetectedSubscriptions([]);
@@ -203,29 +242,54 @@ export default function ScanEmailScreen() {
   };
 
   const handleAddSelected = () => {
-    const selected = detectedSubscriptions.filter((s) => selectedItems.has(s.name));
+    try {
+      const selected = detectedSubscriptions.filter((s) => selectedItems.has(s.name));
 
-    for (const sub of selected) {
-      const now = new Date();
-      const nextMonth = new Date(now.getFullYear(), now.getMonth() + 1, now.getDate());
+      for (const sub of selected) {
+        const now = new Date();
+        const nextMonth = new Date(now.getFullYear(), now.getMonth() + 1, now.getDate());
 
-      addSubscription({
-        name: sub.name,
-        price: sub.price || 0,
-        currency: sub.currency,
-        billingCycle: sub.billingCycle || 'monthly',
-        category: sub.category,
-        nextBillingDate: nextMonth.toISOString(),
-        startDate: now.toISOString(),
-        isActive: true,
-      });
+        // 支払い履歴から最も古い日付を開始日として使用
+        let startDate = now.toISOString();
+        if (sub.paymentHistory && sub.paymentHistory.length > 0) {
+          const sortedHistory = [...sub.paymentHistory].sort(
+            (a, b) => new Date(a.date).getTime() - new Date(b.date).getTime()
+          );
+          startDate = sortedHistory[0].date;
+        }
+
+        // 支払い履歴をPaymentRecord形式に変換
+        const paymentHistory = sub.paymentHistory?.map(h => ({
+          date: h.date,
+          price: h.price,
+          currency: h.currency,
+          subject: h.subject,
+        }));
+
+        const subscriptionData = {
+          name: sub.name,
+          price: sub.price || 0,
+          currency: sub.currency || 'JPY',
+          billingCycle: sub.billingCycle || 'monthly',
+          category: sub.category,
+          nextBillingDate: nextMonth.toISOString(),
+          startDate,
+          isActive: true,
+          paymentHistory,
+          totalPaidFromEmail: sub.totalPaid,
+        };
+
+        addSubscription(subscriptionData);
+      }
+
+      Alert.alert(
+        '追加完了',
+        `${selected.length}件のサブスクを追加しました`,
+        [{ text: 'OK', onPress: () => navigation.goBack() }],
+      );
+    } catch (error: any) {
+      Alert.alert('エラー', `追加中にエラーが発生しました: ${error.message}`);
     }
-
-    Alert.alert(
-      '追加完了',
-      `${selected.length}件のサブスクを追加しました`,
-      [{ text: 'OK', onPress: () => navigation.goBack() }],
-    );
   };
 
   const getBillingCycleLabel = (cycle: BillingCycle | null): string => {
@@ -325,6 +389,16 @@ export default function ScanEmailScreen() {
         <Icon name="help-circle-outline" size={16} color={theme.colors.primary} />
         <Text style={styles.helpLinkText}>App専用パスワードの作成方法</Text>
       </TouchableOpacity>
+
+      {hasSavedCredentials && (
+        <TouchableOpacity
+          style={styles.rescanMainButton}
+          onPress={handleICloudScan}
+        >
+          <Icon name="refresh" size={24} color="#FFFFFF" />
+          <Text style={styles.scanButtonText}>再スキャン</Text>
+        </TouchableOpacity>
+      )}
     </View>
   );
 
@@ -350,7 +424,11 @@ export default function ScanEmailScreen() {
             <ActivityIndicator size="large" color={theme.colors.primary} />
             <Text style={styles.statusText}>
               メールを取得中...
-              {progress.total > 0 && ` (${progress.current}/${progress.total})`}
+              {progress.total > 0
+                ? ` (${progress.current}/${progress.total})`
+                : progress.current > 0
+                ? ` (${progress.current}件)`
+                : ''}
             </Text>
           </View>
         );
@@ -428,7 +506,7 @@ export default function ScanEmailScreen() {
           </TouchableOpacity>
         )}
 
-        {userEmail && (status === 'idle' || status === 'done') && (
+        {userEmail && status === 'idle' && (
           <TouchableOpacity
             style={styles.scanButton}
             onPress={provider === 'gmail' ? handleGmailScan : handleICloudScan}
@@ -463,9 +541,14 @@ export default function ScanEmailScreen() {
                   <Text style={styles.resultCategory}>
                     {getCategoryLabel(sub.category)}
                   </Text>
+                  {sub.paymentCount && sub.paymentCount > 0 && (
+                    <Text style={styles.resultHistory}>
+                      {sub.paymentCount}回の支払い履歴 / 累計 {formatPrice(sub.totalPaid || 0, sub.currency)}
+                    </Text>
+                  )}
                 </View>
                 <View style={styles.resultRight}>
-                  {sub.price ? (
+                  {sub.price !== null && sub.price !== undefined ? (
                     <>
                       <Text style={styles.resultPrice}>
                         {formatPrice(sub.price, sub.currency)}
@@ -490,6 +573,17 @@ export default function ScanEmailScreen() {
               新しいサブスクは検出されませんでした
             </Text>
           </View>
+        )}
+
+        {/* 再スキャンボタン */}
+        {status === 'done' && userEmail && (
+          <TouchableOpacity
+            style={styles.rescanButton}
+            onPress={provider === 'gmail' ? handleGmailScan : handleICloudScan}
+          >
+            <Icon name="refresh" size={20} color={theme.colors.primary} />
+            <Text style={styles.rescanButtonText}>再スキャン</Text>
+          </TouchableOpacity>
         )}
       </ScrollView>
 
@@ -593,6 +687,16 @@ const createStyles = (theme: ReturnType<typeof useTheme>) =>
     formSection: {
       padding: 16,
       paddingTop: 0,
+    },
+    rescanMainButton: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: theme.colors.primary,
+      marginTop: 20,
+      padding: 16,
+      borderRadius: 12,
+      gap: 8,
     },
     formLabel: {
       fontSize: 14,
@@ -699,6 +803,11 @@ const createStyles = (theme: ReturnType<typeof useTheme>) =>
       color: theme.colors.textSecondary,
       marginTop: 2,
     },
+    resultHistory: {
+      fontSize: 12,
+      color: theme.colors.primary,
+      marginTop: 4,
+    },
     resultRight: {
       alignItems: 'flex-end',
     },
@@ -724,6 +833,25 @@ const createStyles = (theme: ReturnType<typeof useTheme>) =>
       fontSize: 14,
       color: theme.colors.textSecondary,
       marginTop: 12,
+    },
+    rescanButton: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: theme.colors.card,
+      marginHorizontal: 16,
+      marginTop: 8,
+      marginBottom: 16,
+      padding: 14,
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: theme.colors.primary,
+      gap: 8,
+    },
+    rescanButtonText: {
+      color: theme.colors.primary,
+      fontSize: 15,
+      fontWeight: '600',
     },
     bottomBar: {
       padding: 16,

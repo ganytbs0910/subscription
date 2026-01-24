@@ -11,6 +11,13 @@ export type Category =
   | 'education'
   | 'other';
 
+export interface PaymentRecord {
+  date: string;
+  price: number;
+  currency: string;
+  subject?: string;
+}
+
 export interface Subscription {
   id: string;
   name: string;
@@ -26,6 +33,10 @@ export interface Subscription {
   isActive: boolean;
   createdAt: string;
   updatedAt: string;
+  // メールから取得した支払い履歴
+  paymentHistory?: PaymentRecord[];
+  // メールから検出された実際の累計支払い額
+  totalPaidFromEmail?: number;
 }
 
 export interface SubscriptionFormData {

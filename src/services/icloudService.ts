@@ -5,7 +5,7 @@ import type { DetectedSubscription } from './emailParser';
 // 本番: https://your-app.vercel.app
 const API_BASE_URL = __DEV__
   ? 'http://192.168.40.70:3000'
-  : 'https://your-subscription-app.vercel.app'; // TODO: デプロイ後に実際のURLに変更
+  : 'https://subscription-server-chi.vercel.app';
 
 export interface ICloudCredentials {
   email: string;

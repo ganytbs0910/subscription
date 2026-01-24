@@ -45,9 +45,10 @@ export const calculateTotalYearly = (subscriptions: Subscription[]): number => {
     .reduce((total, sub) => total + getYearlyAmount(sub.price, sub.billingCycle), 0);
 };
 
-export const formatPrice = (price: number, currency: string): string => {
-  const symbol = getCurrencySymbol(currency);
-  if (currency === 'JPY') {
+export const formatPrice = (price: number, currency: string | null | undefined): string => {
+  const curr = currency || 'JPY';
+  const symbol = getCurrencySymbol(curr);
+  if (curr === 'JPY') {
     return `${symbol}${Math.round(price).toLocaleString()}`;
   }
   return `${symbol}${price.toFixed(2)}`;
@@ -135,6 +136,16 @@ export const calculateTotalPaidSinceStart = (subscriptions: Subscription[]): num
   return subscriptions
     .filter((sub) => sub.isActive)
     .reduce((total, sub) => {
+      // メールから取得した実際の支払い履歴がある場合はそれを使用
+      if (sub.totalPaidFromEmail !== undefined && sub.totalPaidFromEmail > 0) {
+        return total + sub.totalPaidFromEmail;
+      }
+      // なければ支払い履歴から計算
+      if (sub.paymentHistory && sub.paymentHistory.length > 0) {
+        const historyTotal = sub.paymentHistory.reduce((sum, h) => sum + h.price, 0);
+        return total + historyTotal;
+      }
+      // どちらもなければ従来の推定計算
       const paymentCount = calculatePaymentCount(sub.startDate, sub.billingCycle);
       return total + (sub.price * paymentCount);
     }, 0);
@@ -158,4 +169,83 @@ export const calculateNextMonthPayments = (subscriptions: Subscription[]): {
   const total = nextMonthSubs.reduce((sum, sub) => sum + sub.price, 0);
 
   return { total, subscriptions: nextMonthSubs };
+};
+
+export interface MonthlyPaymentSummary {
+  year: number;
+  month: number;
+  label: string;
+  total: number;
+  payments: Array<{
+    name: string;
+    price: number;
+    currency: string;
+    date: string;
+  }>;
+}
+
+// 月別支払い履歴を集計（過去N ヶ月分）
+export const calculateMonthlyPaymentHistory = (
+  subscriptions: Subscription[],
+  monthsBack: number = 6
+): MonthlyPaymentSummary[] => {
+  const summaries: Map<string, MonthlyPaymentSummary> = new Map();
+
+  // 過去N ヶ月分の空の集計を作成
+  const today = new Date();
+  for (let i = 0; i < monthsBack; i++) {
+    const targetDate = addMonths(today, -i);
+    const year = targetDate.getFullYear();
+    const month = targetDate.getMonth() + 1;
+    const key = `${year}-${month.toString().padStart(2, '0')}`;
+    summaries.set(key, {
+      year,
+      month,
+      label: format(targetDate, 'yyyy年M月', { locale: ja }),
+      total: 0,
+      payments: [],
+    });
+  }
+
+  // 各サブスクの支払い履歴を集計
+  for (const sub of subscriptions) {
+    if (!sub.paymentHistory) continue;
+
+    for (const payment of sub.paymentHistory) {
+      const paymentDate = parseISO(payment.date);
+      const year = paymentDate.getFullYear();
+      const month = paymentDate.getMonth() + 1;
+      const key = `${year}-${month.toString().padStart(2, '0')}`;
+
+      const summary = summaries.get(key);
+      if (summary) {
+        summary.total += payment.price;
+        summary.payments.push({
+          name: sub.name,
+          price: payment.price,
+          currency: payment.currency,
+          date: payment.date,
+        });
+      }
+    }
+  }
+
+  // 日付順にソート（新しい順）
+  return Array.from(summaries.values()).sort((a, b) => {
+    if (a.year !== b.year) return b.year - a.year;
+    return b.month - a.month;
+  });
+};
+
+// 今月と先月の比較
+export const compareWithLastMonth = (
+  subscriptions: Subscription[]
+): { thisMonth: number; lastMonth: number; difference: number; percentChange: number } => {
+  const history = calculateMonthlyPaymentHistory(subscriptions, 2);
+  const thisMonth = history[0]?.total || 0;
+  const lastMonth = history[1]?.total || 0;
+  const difference = thisMonth - lastMonth;
+  const percentChange = lastMonth > 0 ? ((difference / lastMonth) * 100) : 0;
+
+  return { thisMonth, lastMonth, difference, percentChange };
 };

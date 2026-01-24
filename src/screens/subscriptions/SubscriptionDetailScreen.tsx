@@ -189,7 +189,49 @@ export default function SubscriptionDetailScreen() {
             </View>
           </View>
         )}
+
+        {subscription.totalPaidFromEmail !== undefined && subscription.totalPaidFromEmail > 0 && (
+          <View style={styles.detailRow}>
+            <View style={styles.detailIcon}>
+              <Icon name="cash-multiple" size={20} color={theme.colors.warning} />
+            </View>
+            <View style={styles.detailContent}>
+              <Text style={styles.detailLabel}>メールから検出した累計支払額</Text>
+              <Text style={styles.detailValue}>
+                {formatPrice(subscription.totalPaidFromEmail, subscription.currency)}
+              </Text>
+            </View>
+          </View>
+        )}
       </View>
+
+      {subscription.paymentHistory && subscription.paymentHistory.length > 0 && (
+        <View style={styles.historySection}>
+          <Text style={styles.sectionTitle}>
+            支払い履歴 ({subscription.paymentHistory.length}件)
+          </Text>
+          {subscription.paymentHistory
+            .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+            .slice(0, 10)
+            .map((payment, index) => (
+              <View key={index} style={styles.historyItem}>
+                <View style={styles.historyDate}>
+                  <Text style={styles.historyDateText}>
+                    {formatDate(payment.date)}
+                  </Text>
+                </View>
+                <Text style={styles.historyPrice}>
+                  {formatPrice(payment.price, payment.currency)}
+                </Text>
+              </View>
+            ))}
+          {subscription.paymentHistory.length > 10 && (
+            <Text style={styles.historyMore}>
+              他 {subscription.paymentHistory.length - 10} 件
+            </Text>
+          )}
+        </View>
+      )}
 
       <View style={styles.actions}>
         <TouchableOpacity
@@ -354,5 +396,43 @@ const createStyles = (theme: ReturnType<typeof useTheme>) =>
     actionButtonText: {
       fontSize: 16,
       fontWeight: '600',
+    },
+    historySection: {
+      margin: 16,
+      backgroundColor: theme.colors.card,
+      borderRadius: 12,
+      padding: 16,
+    },
+    sectionTitle: {
+      fontSize: 16,
+      fontWeight: '600',
+      color: theme.colors.text,
+      marginBottom: 12,
+    },
+    historyItem: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      paddingVertical: 10,
+      borderBottomWidth: 1,
+      borderBottomColor: theme.colors.border,
+    },
+    historyDate: {
+      flex: 1,
+    },
+    historyDateText: {
+      fontSize: 14,
+      color: theme.colors.textSecondary,
+    },
+    historyPrice: {
+      fontSize: 15,
+      fontWeight: '600',
+      color: theme.colors.text,
+    },
+    historyMore: {
+      fontSize: 13,
+      color: theme.colors.textSecondary,
+      textAlign: 'center',
+      marginTop: 12,
     },
   });

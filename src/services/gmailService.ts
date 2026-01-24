@@ -23,31 +23,54 @@ export interface GmailMessageDetail {
 
 export const fetchSubscriptionEmails = async (
   accessToken: string,
+  maxResults?: number, // undefinedなら全件取得
+  onProgress?: (fetched: number) => void,
 ): Promise<GmailMessage[]> => {
-  // サブスク関連のメールを検索するクエリ
-  const searchTerms = [
-    'subject:(receipt OR invoice OR 領収書 OR 請求 OR subscription OR サブスクリプション OR 月額 OR 年額 OR renewal OR 更新)',
-    'from:(netflix OR spotify OR amazon OR apple OR google OR youtube OR disney OR hulu OR adobe OR microsoft OR dropbox OR notion OR slack OR zoom OR github OR figma)',
-  ];
+  // サブスク関連のメールを検索するクエリ（送信者制限なし）
+  // 請求書・領収書関連のキーワードで幅広く検索
+  const query = encodeURIComponent(
+    'subject:(receipt OR invoice OR payment OR billing OR subscription OR 領収書 OR 領収 OR 請求書 OR 請求 OR お支払い OR 支払い OR サブスクリプション OR 月額 OR 年額 OR 更新 OR renewal OR renewed OR charge OR charged)'
+  );
 
-  const query = encodeURIComponent(searchTerms.join(' '));
+  const allMessages: GmailMessage[] = [];
+  let pageToken: string | undefined;
 
-  const response = await fetch(
-    `${GMAIL_API_BASE}/messages?q=${query}&maxResults=100`,
-    {
+  // ページネーションで取得（maxResultsがundefinedなら全件）
+  while (true) {
+    // 上限が設定されていて、既に達している場合は終了
+    if (maxResults !== undefined && allMessages.length >= maxResults) {
+      break;
+    }
+
+    const url = pageToken
+      ? `${GMAIL_API_BASE}/messages?q=${query}&maxResults=100&pageToken=${pageToken}`
+      : `${GMAIL_API_BASE}/messages?q=${query}&maxResults=100`;
+
+    const response = await fetch(url, {
       headers: {
         Authorization: `Bearer ${accessToken}`,
       },
-    },
-  );
+    });
 
-  if (!response.ok) {
-    const error = await response.json();
-    throw new Error(error.error?.message || 'Failed to fetch emails');
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.error?.message || 'Failed to fetch emails');
+    }
+
+    const data = await response.json();
+    const messages = data.messages || [];
+    allMessages.push(...messages);
+
+    // 進捗を通知
+    if (onProgress) {
+      onProgress(allMessages.length);
+    }
+
+    pageToken = data.nextPageToken;
+    if (!pageToken || messages.length === 0) break;
   }
 
-  const data = await response.json();
-  return data.messages || [];
+  return maxResults !== undefined ? allMessages.slice(0, maxResults) : allMessages;
 };
 
 export const fetchEmailDetail = async (

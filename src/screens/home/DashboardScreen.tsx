@@ -17,6 +17,7 @@ import {
   calculateTotalYearly,
   calculateTotalPaidSinceStart,
   calculateNextMonthPayments,
+  calculateMonthlyPaymentHistory,
   formatPrice,
   getUpcomingSubscriptions,
   getDaysUntilNextBilling,
@@ -35,9 +36,10 @@ export default function DashboardScreen() {
   const activeSubscriptions = subscriptions.filter((sub) => sub.isActive);
   const monthlyTotal = calculateTotalMonthly(activeSubscriptions);
   const yearlyTotal = calculateTotalYearly(activeSubscriptions);
-  const totalPaid = calculateTotalPaidSinceStart(activeSubscriptions);
+  const totalPaid = calculateTotalPaidSinceStart(subscriptions); // 全サブスク対象
   const nextMonthData = calculateNextMonthPayments(activeSubscriptions);
   const upcomingPayments = getUpcomingSubscriptions(activeSubscriptions, 14);
+  const monthlyHistory = calculateMonthlyPaymentHistory(subscriptions, 6);
 
   const styles = createStyles(theme);
 
@@ -163,6 +165,40 @@ export default function DashboardScreen() {
           </View>
         )}
       </View>
+
+      {/* 月別支払い履歴 */}
+      {monthlyHistory.some(m => m.total > 0) && (
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>月別支払い履歴</Text>
+          {monthlyHistory.map((month) => (
+            <View key={`${month.year}-${month.month}`} style={styles.monthlyCard}>
+              <View style={styles.monthlyHeader}>
+                <Text style={styles.monthlyLabel}>{month.label}</Text>
+                <Text style={styles.monthlyTotal}>
+                  {formatPrice(month.total, settings.currency)}
+                </Text>
+              </View>
+              {month.payments.length > 0 && (
+                <View style={styles.monthlyDetails}>
+                  {month.payments.slice(0, 5).map((payment, idx) => (
+                    <View key={idx} style={styles.monthlyDetailRow}>
+                      <Text style={styles.monthlyDetailName}>{payment.name}</Text>
+                      <Text style={styles.monthlyDetailPrice}>
+                        {formatPrice(payment.price, payment.currency)}
+                      </Text>
+                    </View>
+                  ))}
+                  {month.payments.length > 5 && (
+                    <Text style={styles.monthlyMore}>
+                      他 {month.payments.length - 5} 件
+                    </Text>
+                  )}
+                </View>
+              )}
+            </View>
+          ))}
+        </View>
+      )}
 
       <TouchableOpacity
         style={styles.scanButton}
@@ -361,5 +397,53 @@ const createStyles = (theme: ReturnType<typeof useTheme>) =>
       color: '#FFFFFF',
       fontSize: 16,
       fontWeight: '600',
+    },
+    monthlyCard: {
+      backgroundColor: theme.colors.card,
+      borderRadius: 12,
+      padding: 16,
+      marginBottom: 8,
+    },
+    monthlyHeader: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+    },
+    monthlyLabel: {
+      fontSize: 15,
+      fontWeight: '600',
+      color: theme.colors.text,
+    },
+    monthlyTotal: {
+      fontSize: 16,
+      fontWeight: '700',
+      color: theme.colors.primary,
+    },
+    monthlyDetails: {
+      marginTop: 12,
+      paddingTop: 12,
+      borderTopWidth: 1,
+      borderTopColor: theme.colors.border,
+    },
+    monthlyDetailRow: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      paddingVertical: 4,
+    },
+    monthlyDetailName: {
+      fontSize: 13,
+      color: theme.colors.textSecondary,
+    },
+    monthlyDetailPrice: {
+      fontSize: 13,
+      fontWeight: '500',
+      color: theme.colors.text,
+    },
+    monthlyMore: {
+      fontSize: 12,
+      color: theme.colors.textSecondary,
+      textAlign: 'center',
+      marginTop: 8,
     },
   });

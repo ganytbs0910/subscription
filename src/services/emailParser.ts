@@ -10,15 +10,25 @@ export interface GenericEmail {
   snippet?: string;
 }
 
+export interface PaymentHistoryItem {
+  date: string;
+  price: number;
+  currency: string;
+  subject?: string;
+}
+
 export interface DetectedSubscription {
   name: string;
   category: Category;
   price: number | null;
-  currency: string;
+  currency: string | null;
   billingCycle: BillingCycle | null;
   email: string;
   detectedDate: string;
   confidence: number;
+  paymentHistory?: PaymentHistoryItem[];
+  totalPaid?: number;
+  paymentCount?: number;
 }
 
 interface ServicePattern {
@@ -27,7 +37,6 @@ interface ServicePattern {
   category: Category;
   icon?: string;
   color?: string;
-  defaultCurrency?: string;
 }
 
 const SERVICE_PATTERNS: ServicePattern[] = [
@@ -115,19 +124,42 @@ const SERVICE_PATTERNS: ServicePattern[] = [
   { pattern: /apple\s*tv\+?/i, name: 'Apple TV+', category: 'streaming', color: '#000000' },
 ];
 
-// 金額を抽出するパターン
+// 金額を抽出するパターン（優先度順）
 const PRICE_PATTERNS = [
-  // 日本円
-  { pattern: /[¥￥]\s*([\d,]+)/, currency: 'JPY' },
-  { pattern: /([\d,]+)\s*円/, currency: 'JPY' },
-  { pattern: /JPY\s*([\d,]+)/, currency: 'JPY' },
-  // 米ドル
+  // 日本円 - 合計/Total行を優先
+  { pattern: /(?:合計|total|amount|金額)[：:\s]*[¥￥]\s*([\d,]+)/i, currency: 'JPY' },
+  { pattern: /(?:合計|total|amount|金額)[：:\s]*([\d,]+)\s*円/i, currency: 'JPY' },
+  // 日本円 - 通常パターン
+  { pattern: /[¥￥]\s*([\d,]+)\s*(?:円|JPY)?/i, currency: 'JPY' },
+  { pattern: /([\d,]+)\s*円/i, currency: 'JPY' },
+  { pattern: /JPY\s*([\d,]+)/i, currency: 'JPY' },
+  { pattern: /([\d,]+)\s*JPY/i, currency: 'JPY' },
+  // 米ドル - 合計/Total行を優先
+  { pattern: /(?:合計|total|amount)[：:\s]*\$\s*([\d.]+)/i, currency: 'USD' },
+  // 米ドル - 通常パターン
   { pattern: /\$\s*([\d.]+)/, currency: 'USD' },
-  { pattern: /USD\s*([\d.]+)/, currency: 'USD' },
+  { pattern: /USD\s*([\d.]+)/i, currency: 'USD' },
+  { pattern: /([\d.]+)\s*USD/i, currency: 'USD' },
   // ユーロ
   { pattern: /€\s*([\d.,]+)/, currency: 'EUR' },
-  { pattern: /EUR\s*([\d.,]+)/, currency: 'EUR' },
+  { pattern: /EUR\s*([\d.,]+)/i, currency: 'EUR' },
+  { pattern: /([\d.,]+)\s*EUR/i, currency: 'EUR' },
 ];
+
+// HTMLエンティティを通常文字に変換
+const decodeHtmlEntities = (text: string): string => {
+  return text
+    .replace(/&#165;/g, '¥')
+    .replace(/&#36;/g, '$')
+    .replace(/&yen;/gi, '¥')
+    .replace(/&dollar;/gi, '$')
+    .replace(/&euro;/gi, '€')
+    .replace(/&#8364;/g, '€')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&#160;/g, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/\s+/g, ' '); // 複数の空白を1つに
+};
 
 // 請求サイクルを検出するパターン
 const BILLING_CYCLE_PATTERNS: { pattern: RegExp; cycle: BillingCycle }[] = [
@@ -183,20 +215,117 @@ const extractBody = (email: GmailMessageDetail): string => {
   return body;
 };
 
+// 金額として誤検出しやすいパターンを除外
+const isLikelyNotPrice = (text: string, matchIndex: number): boolean => {
+  // マッチ位置の前後50文字を取得
+  const start = Math.max(0, matchIndex - 50);
+  const end = Math.min(text.length, matchIndex + 50);
+  const context = text.substring(start, end).toLowerCase();
+
+  // 除外パターン
+  const excludePatterns = [
+    /ポイント/,
+    /point/i,
+    /会員番号/,
+    /会員id/,
+    /member/i,
+    /注文番号/,
+    /order.*id/i,
+    /confirmation/i,
+    /確認番号/,
+    /クーポン/,
+    /coupon/i,
+    /割引/,
+    /discount/i,
+    /キャンペーン/,
+    /campaign/i,
+    /プレゼント/,
+    /当選/,
+    /抽選/,
+  ];
+
+  return excludePatterns.some(p => p.test(context));
+};
+
 const extractPrice = (
   text: string,
 ): { price: number; currency: string } | null => {
+  // HTMLエンティティをデコード
+  const decodedText = decodeHtmlEntities(text);
+
+  // サブスクの妥当な価格範囲（月額基準）
+  const MIN_JPY = 100;
+  const MAX_JPY = 20000;  // 月額2万円以上のサブスクはほぼない
+  const MIN_USD = 1;
+  const MAX_USD = 200;    // 月額$200以上のサブスクはほぼない
+  const MIN_EUR = 1;
+  const MAX_EUR = 200;
+
+  // 候補を収集（複数見つかった場合、最も妥当なものを選ぶ）
+  const candidates: Array<{ price: number; currency: string; priority: number }> = [];
+
   for (const { pattern, currency } of PRICE_PATTERNS) {
-    const match = text.match(pattern);
-    if (match) {
-      const priceStr = match[1].replace(/,/g, '');
+    // 全マッチを探す
+    let match;
+    const regex = new RegExp(pattern.source, 'gi');
+    while ((match = regex.exec(decodedText)) !== null) {
+      const fullMatch = match[0];
+      const priceMatch = fullMatch.match(pattern);
+      if (!priceMatch) continue;
+
+      const priceStr = priceMatch[1].replace(/,/g, '');
       const price = parseFloat(priceStr);
-      if (!isNaN(price) && price > 0 && price < 1000000) {
-        return { price, currency };
+
+      // 文脈チェック（ポイントや会員番号を除外）
+      if (isLikelyNotPrice(decodedText, match.index)) {
+        continue;
+      }
+
+      // 通貨ごとの妥当な範囲でフィルタ
+      let isValid = false;
+      if (currency === 'JPY' && price >= MIN_JPY && price <= MAX_JPY) {
+        isValid = true;
+      }
+      if (currency === 'USD' && price >= MIN_USD && price <= MAX_USD) {
+        isValid = true;
+      }
+      if (currency === 'EUR' && price >= MIN_EUR && price <= MAX_EUR) {
+        isValid = true;
+      }
+
+      if (isValid) {
+        // 優先度を計算（合計/total行は高優先度）
+        const contextLower = decodedText.substring(
+          Math.max(0, match.index - 20),
+          match.index
+        ).toLowerCase();
+
+        let priority = 0;
+        if (/合計|total|amount|金額|請求額|お支払い/.test(contextLower)) {
+          priority = 10;
+        } else if (/月額|年額|monthly|yearly|annual/.test(contextLower)) {
+          priority = 5;
+        }
+
+        candidates.push({ price, currency, priority });
       }
     }
   }
-  return null;
+
+  if (candidates.length === 0) {
+    return null;
+  }
+
+  // 優先度でソートし、最も優先度が高いものを返す
+  // 同じ優先度なら、より小さい金額を選ぶ（サブスクは高額より低額の方が多い）
+  candidates.sort((a, b) => {
+    if (b.priority !== a.priority) {
+      return b.priority - a.priority;
+    }
+    return a.price - b.price;
+  });
+
+  return { price: candidates[0].price, currency: candidates[0].currency };
 };
 
 const extractBillingCycle = (text: string): BillingCycle | null => {
@@ -233,8 +362,8 @@ export const parseEmailForSubscription = (
       return {
         name: service.name,
         category: service.category,
-        price: priceInfo?.price || null,
-        currency: priceInfo?.currency || 'JPY',
+        price: priceInfo?.price ?? null,
+        currency: priceInfo?.currency || null,
         billingCycle,
         email: from,
         detectedDate: date || new Date().toISOString(),
@@ -249,19 +378,70 @@ export const parseEmailForSubscription = (
 export const parseMultipleEmails = (
   emails: GmailMessageDetail[],
 ): DetectedSubscription[] => {
-  const detected: DetectedSubscription[] = [];
-  const seenServices = new Set<string>();
+  // サービスごとに支払い履歴を収集
+  const serviceMap = new Map<string, {
+    subscription: DetectedSubscription;
+    paymentHistory: PaymentHistoryItem[];
+  }>();
 
   for (const email of emails) {
     const subscription = parseEmailForSubscription(email);
-    if (subscription && !seenServices.has(subscription.name)) {
-      seenServices.add(subscription.name);
-      detected.push(subscription);
+    if (!subscription) continue;
+
+    const existing = serviceMap.get(subscription.name);
+
+    // 支払い履歴として追加（価格が検出できた場合）
+    const paymentItem: PaymentHistoryItem | null = subscription.price
+      ? {
+          date: subscription.detectedDate,
+          price: subscription.price,
+          currency: subscription.currency || 'JPY',
+          subject: extractHeader(email, 'Subject'),
+        }
+      : null;
+
+    if (existing) {
+      // 既存のサービスに支払い履歴を追加
+      if (paymentItem) {
+        existing.paymentHistory.push(paymentItem);
+      }
+      // より高い信頼度の情報で更新
+      if (subscription.confidence > existing.subscription.confidence) {
+        existing.subscription = {
+          ...subscription,
+          paymentHistory: existing.paymentHistory,
+        };
+      }
+    } else {
+      // 新しいサービスとして追加
+      serviceMap.set(subscription.name, {
+        subscription: {
+          ...subscription,
+          paymentHistory: paymentItem ? [paymentItem] : [],
+        },
+        paymentHistory: paymentItem ? [paymentItem] : [],
+      });
     }
   }
 
+  // 結果を組み立て
+  const results = Array.from(serviceMap.values()).map(({ subscription, paymentHistory }) => {
+    // 支払い履歴を日付順にソート（古い順）
+    paymentHistory.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+
+    // 合計を計算
+    const totalPaid = paymentHistory.reduce((sum, h) => sum + h.price, 0);
+
+    return {
+      ...subscription,
+      paymentHistory,
+      totalPaid,
+      paymentCount: paymentHistory.length,
+    };
+  });
+
   // 信頼度で降順ソート
-  return detected.sort((a, b) => b.confidence - a.confidence);
+  return results.sort((a, b) => b.confidence - a.confidence);
 };
 
 // GmailMessageDetailをGenericEmailに変換
@@ -296,8 +476,8 @@ export const parseGenericEmailForSubscription = (
       return {
         name: service.name,
         category: service.category,
-        price: priceInfo?.price || null,
-        currency: priceInfo?.currency || 'JPY',
+        price: priceInfo?.price ?? null,
+        currency: priceInfo?.currency || null,
         billingCycle,
         email: email.from,
         detectedDate: email.date,
@@ -313,16 +493,67 @@ export const parseGenericEmailForSubscription = (
 export const parseMultipleGenericEmails = (
   emails: GenericEmail[],
 ): DetectedSubscription[] => {
-  const detected: DetectedSubscription[] = [];
-  const seenServices = new Set<string>();
+  // サービスごとに支払い履歴を収集
+  const serviceMap = new Map<string, {
+    subscription: DetectedSubscription;
+    paymentHistory: PaymentHistoryItem[];
+  }>();
 
   for (const email of emails) {
     const subscription = parseGenericEmailForSubscription(email);
-    if (subscription && !seenServices.has(subscription.name)) {
-      seenServices.add(subscription.name);
-      detected.push(subscription);
+    if (!subscription) continue;
+
+    const existing = serviceMap.get(subscription.name);
+
+    // 支払い履歴として追加（価格が検出できた場合）
+    const paymentItem: PaymentHistoryItem | null = subscription.price
+      ? {
+          date: subscription.detectedDate,
+          price: subscription.price,
+          currency: subscription.currency || 'JPY',
+          subject: email.subject,
+        }
+      : null;
+
+    if (existing) {
+      // 既存のサービスに支払い履歴を追加
+      if (paymentItem) {
+        existing.paymentHistory.push(paymentItem);
+      }
+      // より高い信頼度の情報で更新
+      if (subscription.confidence > existing.subscription.confidence) {
+        existing.subscription = {
+          ...subscription,
+          paymentHistory: existing.paymentHistory,
+        };
+      }
+    } else {
+      // 新しいサービスとして追加
+      serviceMap.set(subscription.name, {
+        subscription: {
+          ...subscription,
+          paymentHistory: paymentItem ? [paymentItem] : [],
+        },
+        paymentHistory: paymentItem ? [paymentItem] : [],
+      });
     }
   }
 
-  return detected.sort((a, b) => b.confidence - a.confidence);
+  // 結果を組み立て
+  const results = Array.from(serviceMap.values()).map(({ subscription, paymentHistory }) => {
+    // 支払い履歴を日付順にソート（古い順）
+    paymentHistory.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+
+    // 合計を計算
+    const totalPaid = paymentHistory.reduce((sum, h) => sum + h.price, 0);
+
+    return {
+      ...subscription,
+      paymentHistory,
+      totalPaid,
+      paymentCount: paymentHistory.length,
+    };
+  });
+
+  return results.sort((a, b) => b.confidence - a.confidence);
 };

@@ -1,8 +1,15 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import { MMKV } from 'react-native-mmkv';
-import { v4 as uuidv4 } from 'uuid';
 import type { Subscription, AppSettings } from '../types';
+
+// React Native対応のシンプルなID生成関数
+const generateId = (): string => {
+  const timestamp = Date.now().toString(36);
+  const randomPart = Math.random().toString(36).substring(2, 15);
+  const randomPart2 = Math.random().toString(36).substring(2, 15);
+  return `${timestamp}-${randomPart}-${randomPart2}`;
+};
 
 const storage = new MMKV();
 
@@ -43,7 +50,7 @@ export const useSubscriptionStore = create<SubscriptionState>()(
         const now = new Date().toISOString();
         const newSubscription: Subscription = {
           ...subscriptionData,
-          id: uuidv4(),
+          id: generateId(),
           createdAt: now,
           updatedAt: now,
         };
