@@ -18,11 +18,22 @@ export interface TestConnectionResult {
   error?: string;
 }
 
+export interface AIExtractionDebug {
+  service: string;
+  contentLength: number;
+  contentPreview: string;
+  aiResult: { price: number; currency: string; billingCycle: string } | null;
+}
+
 export interface FetchSubscriptionsResult {
   success: boolean;
   subscriptions: DetectedSubscription[];
   totalFound: number;
   error?: string;
+  debug?: {
+    servicesNeedingAI: string[];
+    aiExtractionResults: AIExtractionDebug[];
+  };
 }
 
 export const testICloudConnection = async (
@@ -64,6 +75,35 @@ export const fetchICloudSubscriptions = async (
     });
 
     const data = await response.json();
+
+    // 結果のサマリーをコンソールに出力
+    console.log('\n========================================');
+    console.log('       Subscription Scan Results');
+    console.log('========================================');
+    data.subscriptions?.forEach((sub: any) => {
+      const priceStr = sub.price !== null ? `${sub.price} ${sub.currency}` : '金額不明';
+      const source = sub.extractedByAI ? '🤖 AI' : (sub.priceDetected ? '📝 Pattern' : '❌ N/A');
+      console.log(`${sub.name.padEnd(20)} ${priceStr.padEnd(15)} [${source}]`);
+    });
+    console.log('========================================');
+
+    // AI抽出の詳細デバッグ情報
+    if (data.debug) {
+      console.log('\n--- AI Extraction Debug ---');
+      console.log('Services needing AI:', data.debug.servicesNeedingAI?.join(', ') || 'none');
+      data.debug.aiExtractionResults?.forEach((result: AIExtractionDebug) => {
+        console.log(`\n[${result.service}]`);
+        console.log(`  Content length: ${result.contentLength} chars`);
+        if (result.aiResult) {
+          console.log(`  ✓ AI Result: ${result.aiResult.price} ${result.aiResult.currency}`);
+        } else {
+          console.log(`  ✗ AI could not extract price`);
+          console.log(`  Preview: ${result.contentPreview?.substring(0, 100)}...`);
+        }
+      });
+      console.log('---------------------------\n');
+    }
+
     return data;
   } catch (error: any) {
     return {

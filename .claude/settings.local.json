@@ -31,7 +31,15 @@
       "Bash(git init:*)",
       "Bash(xcodebuild:*)",
       "Bash(curl -s -X POST https://subscription-server-chi.vercel.app/api/icloud/fetch-emails -H \"Content-Type: application/json\" -d '{\"\"email\"\":\"\"test@icloud.com\"\",\"\"appPassword\"\":\"\"test\"\"}')",
-      "Bash(curl -s -X POST \"https://subscription-server-chi.vercel.app/api/icloud/fetch-emails\" -H \"Content-Type: application/json\" -d '{\"\"email\"\":\"\"test@icloud.com\"\",\"\"appPassword\"\":\"\"test\"\"}')"
+      "Bash(curl -s -X POST \"https://subscription-server-chi.vercel.app/api/icloud/fetch-emails\" -H \"Content-Type: application/json\" -d '{\"\"email\"\":\"\"test@icloud.com\"\",\"\"appPassword\"\":\"\"test\"\"}')",
+      "Bash(pkill:*)",
+      "Bash(xcrun simctl boot:*)",
+      "Bash(xcrun simctl spawn:*)",
+      "Bash(xcrun simctl terminate:*)",
+      "Bash(xcrun simctl launch:*)",
+      "Bash(curl:*)",
+      "Bash(xcrun simctl install:*)",
+      "Bash(open:*)"
     ]
   }
 }

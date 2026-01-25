@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   View,
   Text,
@@ -13,19 +13,28 @@ import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 
 import { useTheme } from '../../hooks/useTheme';
 import { useSubscriptionStore } from '../../stores/subscriptionStore';
-import { formatPrice } from '../../utils/calculations';
+import { formatPrice, calculateTotalMonthly } from '../../utils/calculations';
 import { getCategoryLabel, getBillingCycleLabel, CATEGORIES } from '../../utils/presets';
-import type { RootStackParamList, Subscription, Category } from '../../types';
+import type { RootStackParamList, Subscription } from '../../types';
 
 type NavigationProp = NativeStackNavigationProp<RootStackParamList>;
-
 type ViewMode = 'list' | 'category';
 
 export default function SubscriptionListScreen() {
   const theme = useTheme();
   const navigation = useNavigation<NavigationProp>();
-  const { subscriptions } = useSubscriptionStore();
+  const { subscriptions, settings } = useSubscriptionStore();
   const [viewMode, setViewMode] = useState<ViewMode>('list');
+
+  const activeCount = useMemo(() =>
+    subscriptions.filter(s => s.isActive).length,
+    [subscriptions]
+  );
+
+  const monthlyTotal = useMemo(() =>
+    calculateTotalMonthly(subscriptions.filter(s => s.isActive)),
+    [subscriptions]
+  );
 
   const styles = createStyles(theme);
 
@@ -35,34 +44,35 @@ export default function SubscriptionListScreen() {
       onPress={() =>
         navigation.navigate('SubscriptionDetail', { subscriptionId: item.id })
       }
+      activeOpacity={0.7}
     >
       <View
         style={[
           styles.iconContainer,
           { backgroundColor: item.color || theme.colors.primary },
+          !item.isActive && styles.iconContainerInactive,
         ]}
       >
-        <Icon name={item.icon || 'credit-card'} size={24} color="#FFFFFF" />
+        <Icon name={item.icon || 'credit-card'} size={22} color="#FFFFFF" />
       </View>
       <View style={styles.subscriptionInfo}>
-        <Text style={styles.subscriptionName}>{item.name}</Text>
+        <View style={styles.nameRow}>
+          <Text style={[styles.subscriptionName, !item.isActive && styles.textInactive]}>
+            {item.name}
+          </Text>
+          {!item.isActive && (
+            <View style={styles.inactiveBadge}>
+              <Text style={styles.inactiveBadgeText}>停止中</Text>
+            </View>
+          )}
+        </View>
         <Text style={styles.subscriptionMeta}>
-          {getCategoryLabel(item.category)} • {getBillingCycleLabel(item.billingCycle)}
+          {getBillingCycleLabel(item.billingCycle)}
         </Text>
       </View>
-      <View style={styles.subscriptionRight}>
-        <Text style={styles.subscriptionPrice}>
-          {formatPrice(item.price, item.currency)}
-        </Text>
-        {!item.isActive && (
-          <Text style={styles.inactiveLabel}>停止中</Text>
-        )}
-      </View>
-      <Icon
-        name="chevron-right"
-        size={24}
-        color={theme.colors.textSecondary}
-      />
+      <Text style={[styles.subscriptionPrice, !item.isActive && styles.textInactive]}>
+        {formatPrice(item.price, item.currency)}
+      </Text>
     </TouchableOpacity>
   );
 
@@ -78,75 +88,109 @@ export default function SubscriptionListScreen() {
     section: { title: string; icon: string; data: Subscription[] };
   }) => (
     <View style={styles.sectionHeader}>
-      <Icon name={section.icon} size={20} color={theme.colors.primary} />
+      <View style={styles.sectionIconContainer}>
+        <Icon name={section.icon} size={16} color={theme.colors.primary} />
+      </View>
       <Text style={styles.sectionTitle}>{section.title}</Text>
-      <Text style={styles.sectionCount}>{section.data.length}</Text>
+      <View style={styles.sectionBadge}>
+        <Text style={styles.sectionBadgeText}>{section.data.length}</Text>
+      </View>
     </View>
   );
 
+  if (subscriptions.length === 0) {
+    return (
+      <View style={styles.container}>
+        <View style={styles.emptyState}>
+          <View style={styles.emptyIconContainer}>
+            <Icon name="credit-card-plus-outline" size={48} color={theme.colors.textSecondary} />
+          </View>
+          <Text style={styles.emptyTitle}>サブスクを追加しましょう</Text>
+          <Text style={styles.emptyDescription}>
+            メールスキャンで自動検出するか、{'\n'}手動で追加できます
+          </Text>
+          <View style={styles.emptyButtons}>
+            <TouchableOpacity
+              style={styles.emptyPrimaryButton}
+              onPress={() => navigation.navigate('ScanEmail')}
+            >
+              <Icon name="email-search" size={20} color="#FFFFFF" />
+              <Text style={styles.emptyPrimaryButtonText}>メールをスキャン</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.emptySecondaryButton}
+              onPress={() => navigation.navigate('AddSubscription')}
+            >
+              <Text style={styles.emptySecondaryButtonText}>手動で追加</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </View>
+    );
+  }
+
   return (
     <View style={styles.container}>
-      <View style={styles.header}>
+      {/* サマリーヘッダー */}
+      <View style={styles.summaryHeader}>
+        <View style={styles.summaryLeft}>
+          <Text style={styles.summaryCount}>{activeCount}件</Text>
+          <Text style={styles.summaryLabel}>契約中</Text>
+        </View>
+        <View style={styles.summaryRight}>
+          <Text style={styles.summaryAmount}>
+            {formatPrice(monthlyTotal, settings.currency)}
+          </Text>
+          <Text style={styles.summaryLabel}>/月</Text>
+        </View>
+      </View>
+
+      {/* ツールバー */}
+      <View style={styles.toolbar}>
         <View style={styles.viewToggle}>
           <TouchableOpacity
-            style={[
-              styles.toggleButton,
-              viewMode === 'list' && styles.toggleButtonActive,
-            ]}
+            style={[styles.toggleButton, viewMode === 'list' && styles.toggleButtonActive]}
             onPress={() => setViewMode('list')}
           >
             <Icon
               name="format-list-bulleted"
-              size={20}
-              color={viewMode === 'list' ? '#FFFFFF' : theme.colors.text}
+              size={18}
+              color={viewMode === 'list' ? '#FFFFFF' : theme.colors.textSecondary}
             />
+            <Text style={[styles.toggleText, viewMode === 'list' && styles.toggleTextActive]}>
+              一覧
+            </Text>
           </TouchableOpacity>
           <TouchableOpacity
-            style={[
-              styles.toggleButton,
-              viewMode === 'category' && styles.toggleButtonActive,
-            ]}
+            style={[styles.toggleButton, viewMode === 'category' && styles.toggleButtonActive]}
             onPress={() => setViewMode('category')}
           >
             <Icon
-              name="view-grid"
-              size={20}
-              color={viewMode === 'category' ? '#FFFFFF' : theme.colors.text}
+              name="shape"
+              size={18}
+              color={viewMode === 'category' ? '#FFFFFF' : theme.colors.textSecondary}
             />
+            <Text style={[styles.toggleText, viewMode === 'category' && styles.toggleTextActive]}>
+              カテゴリ
+            </Text>
           </TouchableOpacity>
         </View>
         <TouchableOpacity
-          style={styles.addIconButton}
+          style={styles.addButton}
           onPress={() => navigation.navigate('AddSubscription')}
         >
-          <Icon name="plus" size={24} color={theme.colors.primary} />
+          <Icon name="plus" size={20} color="#FFFFFF" />
         </TouchableOpacity>
       </View>
 
-      {subscriptions.length === 0 ? (
-        <View style={styles.emptyState}>
-          <Icon
-            name="credit-card-off-outline"
-            size={64}
-            color={theme.colors.textSecondary}
-          />
-          <Text style={styles.emptyTitle}>サブスクがありません</Text>
-          <Text style={styles.emptyDescription}>
-            「追加」ボタンから新しいサブスクを登録してください
-          </Text>
-          <TouchableOpacity
-            style={styles.emptyAddButton}
-            onPress={() => navigation.navigate('AddSubscription')}
-          >
-            <Text style={styles.emptyAddButtonText}>サブスクを追加</Text>
-          </TouchableOpacity>
-        </View>
-      ) : viewMode === 'list' ? (
+      {/* リスト */}
+      {viewMode === 'list' ? (
         <FlatList
           data={subscriptions}
           renderItem={renderSubscriptionItem}
           keyExtractor={(item) => item.id}
           contentContainerStyle={styles.listContent}
+          showsVerticalScrollIndicator={false}
         />
       ) : (
         <SectionList
@@ -155,6 +199,8 @@ export default function SubscriptionListScreen() {
           renderSectionHeader={renderSectionHeader}
           keyExtractor={(item) => item.id}
           contentContainerStyle={styles.listContent}
+          showsVerticalScrollIndicator={false}
+          stickySectionHeadersEnabled={false}
         />
       )}
     </View>
@@ -167,26 +213,79 @@ const createStyles = (theme: ReturnType<typeof useTheme>) =>
       flex: 1,
       backgroundColor: theme.colors.background,
     },
-    header: {
+    summaryHeader: {
       flexDirection: 'row',
       justifyContent: 'space-between',
       alignItems: 'center',
+      backgroundColor: theme.colors.card,
+      marginHorizontal: 16,
+      marginTop: 16,
+      borderRadius: 14,
       padding: 16,
+    },
+    summaryLeft: {
+      flexDirection: 'row',
+      alignItems: 'baseline',
+      gap: 4,
+    },
+    summaryRight: {
+      flexDirection: 'row',
+      alignItems: 'baseline',
+      gap: 2,
+    },
+    summaryCount: {
+      fontSize: 24,
+      fontWeight: '700',
+      color: theme.colors.text,
+    },
+    summaryAmount: {
+      fontSize: 20,
+      fontWeight: '700',
+      color: theme.colors.primary,
+    },
+    summaryLabel: {
+      fontSize: 14,
+      color: theme.colors.textSecondary,
+    },
+    toolbar: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      paddingHorizontal: 16,
+      paddingVertical: 12,
     },
     viewToggle: {
       flexDirection: 'row',
       backgroundColor: theme.colors.card,
-      borderRadius: 8,
-      overflow: 'hidden',
+      borderRadius: 10,
+      padding: 3,
     },
     toggleButton: {
-      padding: 10,
+      flexDirection: 'row',
+      alignItems: 'center',
+      paddingHorizontal: 12,
+      paddingVertical: 8,
+      borderRadius: 8,
+      gap: 6,
     },
     toggleButtonActive: {
       backgroundColor: theme.colors.primary,
     },
-    addIconButton: {
-      padding: 8,
+    toggleText: {
+      fontSize: 13,
+      fontWeight: '600',
+      color: theme.colors.textSecondary,
+    },
+    toggleTextActive: {
+      color: '#FFFFFF',
+    },
+    addButton: {
+      backgroundColor: theme.colors.primary,
+      width: 36,
+      height: 36,
+      borderRadius: 10,
+      alignItems: 'center',
+      justifyContent: 'center',
     },
     listContent: {
       paddingHorizontal: 16,
@@ -196,59 +295,88 @@ const createStyles = (theme: ReturnType<typeof useTheme>) =>
       flexDirection: 'row',
       alignItems: 'center',
       backgroundColor: theme.colors.card,
-      borderRadius: 12,
-      padding: 16,
+      borderRadius: 14,
+      padding: 14,
       marginBottom: 8,
     },
     iconContainer: {
-      width: 48,
-      height: 48,
+      width: 44,
+      height: 44,
       borderRadius: 12,
       alignItems: 'center',
       justifyContent: 'center',
+    },
+    iconContainerInactive: {
+      opacity: 0.5,
     },
     subscriptionInfo: {
       flex: 1,
       marginLeft: 12,
     },
+    nameRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+    },
     subscriptionName: {
-      fontSize: 16,
+      fontSize: 15,
       fontWeight: '600',
       color: theme.colors.text,
+    },
+    textInactive: {
+      opacity: 0.5,
+    },
+    inactiveBadge: {
+      backgroundColor: theme.colors.error + '20',
+      paddingHorizontal: 6,
+      paddingVertical: 2,
+      borderRadius: 4,
+    },
+    inactiveBadgeText: {
+      fontSize: 10,
+      fontWeight: '600',
+      color: theme.colors.error,
     },
     subscriptionMeta: {
-      fontSize: 13,
+      fontSize: 12,
       color: theme.colors.textSecondary,
-      marginTop: 4,
-    },
-    subscriptionRight: {
-      alignItems: 'flex-end',
-      marginRight: 8,
+      marginTop: 2,
     },
     subscriptionPrice: {
-      fontSize: 16,
-      fontWeight: '600',
+      fontSize: 15,
+      fontWeight: '700',
       color: theme.colors.text,
-    },
-    inactiveLabel: {
-      fontSize: 12,
-      color: theme.colors.error,
-      marginTop: 4,
     },
     sectionHeader: {
       flexDirection: 'row',
       alignItems: 'center',
       paddingVertical: 12,
+      paddingTop: 16,
       gap: 8,
     },
+    sectionIconContainer: {
+      width: 28,
+      height: 28,
+      borderRadius: 8,
+      backgroundColor: theme.colors.primary + '15',
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
     sectionTitle: {
-      fontSize: 16,
+      fontSize: 15,
       fontWeight: '600',
       color: theme.colors.text,
       flex: 1,
     },
-    sectionCount: {
-      fontSize: 14,
+    sectionBadge: {
+      backgroundColor: theme.colors.card,
+      paddingHorizontal: 8,
+      paddingVertical: 2,
+      borderRadius: 10,
+    },
+    sectionBadgeText: {
+      fontSize: 12,
+      fontWeight: '600',
       color: theme.colors.textSecondary,
     },
     emptyState: {
@@ -257,28 +385,54 @@ const createStyles = (theme: ReturnType<typeof useTheme>) =>
       justifyContent: 'center',
       padding: 32,
     },
+    emptyIconContainer: {
+      width: 88,
+      height: 88,
+      borderRadius: 44,
+      backgroundColor: theme.colors.card,
+      alignItems: 'center',
+      justifyContent: 'center',
+      marginBottom: 20,
+    },
     emptyTitle: {
       fontSize: 20,
-      fontWeight: '600',
+      fontWeight: '700',
       color: theme.colors.text,
-      marginTop: 16,
+      marginBottom: 8,
     },
     emptyDescription: {
       fontSize: 14,
       color: theme.colors.textSecondary,
       textAlign: 'center',
-      marginTop: 8,
+      lineHeight: 20,
     },
-    emptyAddButton: {
+    emptyButtons: {
+      marginTop: 28,
+      gap: 12,
+      width: '100%',
+    },
+    emptyPrimaryButton: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
       backgroundColor: theme.colors.primary,
-      paddingHorizontal: 24,
-      paddingVertical: 12,
-      borderRadius: 8,
-      marginTop: 24,
+      paddingVertical: 14,
+      borderRadius: 12,
+      gap: 8,
     },
-    emptyAddButtonText: {
+    emptyPrimaryButtonText: {
       color: '#FFFFFF',
-      fontSize: 16,
+      fontSize: 15,
+      fontWeight: '600',
+    },
+    emptySecondaryButton: {
+      alignItems: 'center',
+      justifyContent: 'center',
+      paddingVertical: 14,
+    },
+    emptySecondaryButtonText: {
+      color: theme.colors.primary,
+      fontSize: 15,
       fontWeight: '600',
     },
   });

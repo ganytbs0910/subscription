@@ -5,6 +5,7 @@ import {
   StyleSheet,
   ScrollView,
   TouchableOpacity,
+  Dimensions,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -15,18 +16,16 @@ import { useSubscriptionStore } from '../../stores/subscriptionStore';
 import {
   calculateTotalMonthly,
   calculateTotalYearly,
-  calculateTotalPaidSinceStart,
-  calculateNextMonthPayments,
-  calculateMonthlyPaymentHistory,
   formatPrice,
   getUpcomingSubscriptions,
   getDaysUntilNextBilling,
-  formatShortDate,
 } from '../../utils/calculations';
 import { getCategoryLabel } from '../../utils/presets';
 import type { RootStackParamList } from '../../types';
 
 type NavigationProp = NativeStackNavigationProp<RootStackParamList>;
+
+const { width } = Dimensions.get('window');
 
 export default function DashboardScreen() {
   const theme = useTheme();
@@ -36,78 +35,154 @@ export default function DashboardScreen() {
   const activeSubscriptions = subscriptions.filter((sub) => sub.isActive);
   const monthlyTotal = calculateTotalMonthly(activeSubscriptions);
   const yearlyTotal = calculateTotalYearly(activeSubscriptions);
-  const totalPaid = calculateTotalPaidSinceStart(subscriptions); // 全サブスク対象
-  const nextMonthData = calculateNextMonthPayments(activeSubscriptions);
   const upcomingPayments = getUpcomingSubscriptions(activeSubscriptions, 14);
-  const monthlyHistory = calculateMonthlyPaymentHistory(subscriptions, 6);
+
+  // 支払い履歴の件数を取得
+  const totalPaymentRecords = subscriptions.reduce((sum, sub) => {
+    return sum + (sub.paymentHistory?.length || 0);
+  }, 0);
 
   const styles = createStyles(theme);
 
   return (
-    <ScrollView style={styles.container}>
-      <View style={styles.summaryContainer}>
-        <View style={styles.summaryCard}>
-          <Text style={styles.summaryLabel}>月額合計</Text>
-          <Text style={styles.summaryAmount}>
-            {formatPrice(monthlyTotal, settings.currency)}
-          </Text>
-        </View>
-        <View style={styles.summaryCard}>
-          <Text style={styles.summaryLabel}>年額合計</Text>
-          <Text style={styles.summaryAmount}>
-            {formatPrice(yearlyTotal, settings.currency)}
-          </Text>
-        </View>
-      </View>
-
-      <View style={styles.statsRow}>
-        <View style={styles.statCard}>
-          <Icon name="check-circle" size={24} color={theme.colors.success} />
-          <Text style={styles.statNumber}>{activeSubscriptions.length}</Text>
-          <Text style={styles.statLabel}>契約中</Text>
-        </View>
-        <View style={styles.statCard}>
-          <Icon name="calendar-clock" size={24} color={theme.colors.primary} />
-          <Text style={styles.statNumber}>{upcomingPayments.length}</Text>
-          <Text style={styles.statLabel}>2週間以内</Text>
-        </View>
-      </View>
-
-      <View style={styles.paymentSummaryContainer}>
-        <View style={styles.paymentSummaryCard}>
-          <View style={styles.paymentSummaryHeader}>
-            <Icon name="history" size={20} color={theme.colors.warning} />
-            <Text style={styles.paymentSummaryTitle}>累計支払い額</Text>
+    <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
+      {/* メインカード - 月額合計 */}
+      <View style={styles.mainCard}>
+        <Text style={styles.mainCardLabel}>今月の支払い</Text>
+        <Text style={styles.mainCardAmount}>
+          {formatPrice(monthlyTotal, settings.currency)}
+        </Text>
+        <View style={styles.mainCardDivider} />
+        <View style={styles.mainCardRow}>
+          <View style={styles.mainCardStat}>
+            <Text style={styles.mainCardStatValue}>{activeSubscriptions.length}</Text>
+            <Text style={styles.mainCardStatLabel}>契約中</Text>
           </View>
-          <Text style={styles.paymentSummaryAmount}>
-            {formatPrice(totalPaid, settings.currency)}
-          </Text>
-          <Text style={styles.paymentSummarySubtext}>契約開始からの合計</Text>
-        </View>
-
-        <View style={styles.paymentSummaryCard}>
-          <View style={styles.paymentSummaryHeader}>
-            <Icon name="calendar-month" size={20} color={theme.colors.info} />
-            <Text style={styles.paymentSummaryTitle}>来月の支払い</Text>
+          <View style={styles.mainCardStatDivider} />
+          <View style={styles.mainCardStat}>
+            <Text style={styles.mainCardStatValue}>
+              {formatPrice(yearlyTotal, settings.currency)}
+            </Text>
+            <Text style={styles.mainCardStatLabel}>年間合計</Text>
           </View>
-          <Text style={styles.paymentSummaryAmount}>
-            {formatPrice(nextMonthData.total, settings.currency)}
-          </Text>
-          <Text style={styles.paymentSummarySubtext}>
-            {nextMonthData.subscriptions.length}件のサブスク
-          </Text>
         </View>
       </View>
 
+      {/* クイックアクション */}
+      <View style={styles.quickActions}>
+        <TouchableOpacity
+          style={styles.quickActionButton}
+          onPress={() => navigation.navigate('ScanEmail')}
+        >
+          <View style={[styles.quickActionIcon, { backgroundColor: '#E3F2FD' }]}>
+            <Icon name="email-search" size={22} color="#1976D2" />
+          </View>
+          <Text style={styles.quickActionText}>メール{'\n'}スキャン</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={styles.quickActionButton}
+          onPress={() => navigation.navigate('AddSubscription')}
+        >
+          <View style={[styles.quickActionIcon, { backgroundColor: '#E8F5E9' }]}>
+            <Icon name="plus" size={22} color="#388E3C" />
+          </View>
+          <Text style={styles.quickActionText}>サブスク{'\n'}追加</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={styles.quickActionButton}
+          onPress={() => navigation.navigate('PaymentHistory')}
+        >
+          <View style={[styles.quickActionIcon, { backgroundColor: '#FFF3E0' }]}>
+            <Icon name="receipt" size={22} color="#F57C00" />
+          </View>
+          <Text style={styles.quickActionText}>支払い{'\n'}履歴</Text>
+        </TouchableOpacity>
+      </View>
+
+      {/* 次回請求予定 */}
       <View style={styles.section}>
-        <Text style={styles.sectionTitle}>次回請求予定</Text>
+        <View style={styles.sectionHeader}>
+          <Text style={styles.sectionTitle}>次回請求予定</Text>
+          {upcomingPayments.length > 0 && (
+            <View style={styles.badge}>
+              <Text style={styles.badgeText}>{upcomingPayments.length}</Text>
+            </View>
+          )}
+        </View>
+
         {upcomingPayments.length > 0 ? (
-          upcomingPayments.map((sub) => {
-            const daysUntil = getDaysUntilNextBilling(sub.nextBillingDate);
-            return (
+          <View style={styles.upcomingList}>
+            {upcomingPayments.slice(0, 5).map((sub) => {
+              const daysUntil = getDaysUntilNextBilling(sub.nextBillingDate);
+              const isUrgent = daysUntil <= 3;
+
+              return (
+                <TouchableOpacity
+                  key={sub.id}
+                  style={styles.upcomingCard}
+                  onPress={() =>
+                    navigation.navigate('SubscriptionDetail', {
+                      subscriptionId: sub.id,
+                    })
+                  }
+                >
+                  <View
+                    style={[
+                      styles.upcomingIconContainer,
+                      { backgroundColor: sub.color || theme.colors.primary },
+                    ]}
+                  >
+                    <Icon
+                      name={sub.icon || 'credit-card'}
+                      size={18}
+                      color="#FFFFFF"
+                    />
+                  </View>
+                  <View style={styles.upcomingInfo}>
+                    <Text style={styles.upcomingName}>{sub.name}</Text>
+                    <Text style={styles.upcomingMeta}>
+                      {getCategoryLabel(sub.category)}
+                    </Text>
+                  </View>
+                  <View style={styles.upcomingRight}>
+                    <Text style={styles.upcomingPrice}>
+                      {formatPrice(sub.price, sub.currency)}
+                    </Text>
+                    <View style={[
+                      styles.daysTag,
+                      isUrgent && styles.daysTagUrgent
+                    ]}>
+                      <Text style={[
+                        styles.daysTagText,
+                        isUrgent && styles.daysTagTextUrgent
+                      ]}>
+                        {daysUntil === 0 ? '今日' : daysUntil === 1 ? '明日' : `${daysUntil}日後`}
+                      </Text>
+                    </View>
+                  </View>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        ) : (
+          <View style={styles.emptyCard}>
+            <Icon name="calendar-check" size={40} color={theme.colors.textSecondary} />
+            <Text style={styles.emptyText}>2週間以内の請求予定なし</Text>
+          </View>
+        )}
+      </View>
+
+      {/* サブスク一覧へ */}
+      {activeSubscriptions.length > 0 && (
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>登録中のサブスク</Text>
+          <View style={styles.subscriptionGrid}>
+            {activeSubscriptions.slice(0, 6).map((sub) => (
               <TouchableOpacity
                 key={sub.id}
-                style={styles.upcomingCard}
+                style={styles.subscriptionMini}
                 onPress={() =>
                   navigation.navigate('SubscriptionDetail', {
                     subscriptionId: sub.id,
@@ -116,105 +191,49 @@ export default function DashboardScreen() {
               >
                 <View
                   style={[
-                    styles.upcomingIcon,
+                    styles.subscriptionMiniIcon,
                     { backgroundColor: sub.color || theme.colors.primary },
                   ]}
                 >
-                  <Icon
-                    name={sub.icon || 'credit-card'}
-                    size={20}
-                    color="#FFFFFF"
-                  />
+                  <Icon name={sub.icon || 'apps'} size={20} color="#FFFFFF" />
                 </View>
-                <View style={styles.upcomingInfo}>
-                  <Text style={styles.upcomingName}>{sub.name}</Text>
-                  <Text style={styles.upcomingCategory}>
-                    {getCategoryLabel(sub.category)}
-                  </Text>
-                </View>
-                <View style={styles.upcomingRight}>
-                  <Text style={styles.upcomingPrice}>
-                    {formatPrice(sub.price, sub.currency)}
-                  </Text>
-                  <Text
-                    style={[
-                      styles.upcomingDays,
-                      daysUntil <= 3 && { color: theme.colors.error },
-                    ]}
-                  >
-                    {daysUntil === 0
-                      ? '今日'
-                      : daysUntil === 1
-                      ? '明日'
-                      : `${daysUntil}日後`}
-                  </Text>
-                </View>
-              </TouchableOpacity>
-            );
-          })
-        ) : (
-          <View style={styles.emptyState}>
-            <Icon
-              name="calendar-check"
-              size={48}
-              color={theme.colors.textSecondary}
-            />
-            <Text style={styles.emptyText}>
-              2週間以内の請求予定はありません
-            </Text>
-          </View>
-        )}
-      </View>
-
-      {/* 月別支払い履歴 */}
-      {monthlyHistory.some(m => m.total > 0) && (
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>月別支払い履歴</Text>
-          {monthlyHistory.map((month) => (
-            <View key={`${month.year}-${month.month}`} style={styles.monthlyCard}>
-              <View style={styles.monthlyHeader}>
-                <Text style={styles.monthlyLabel}>{month.label}</Text>
-                <Text style={styles.monthlyTotal}>
-                  {formatPrice(month.total, settings.currency)}
+                <Text style={styles.subscriptionMiniName} numberOfLines={1}>
+                  {sub.name}
                 </Text>
-              </View>
-              {month.payments.length > 0 && (
-                <View style={styles.monthlyDetails}>
-                  {month.payments.slice(0, 5).map((payment, idx) => (
-                    <View key={idx} style={styles.monthlyDetailRow}>
-                      <Text style={styles.monthlyDetailName}>{payment.name}</Text>
-                      <Text style={styles.monthlyDetailPrice}>
-                        {formatPrice(payment.price, payment.currency)}
-                      </Text>
-                    </View>
-                  ))}
-                  {month.payments.length > 5 && (
-                    <Text style={styles.monthlyMore}>
-                      他 {month.payments.length - 5} 件
-                    </Text>
-                  )}
-                </View>
-              )}
-            </View>
-          ))}
+                <Text style={styles.subscriptionMiniPrice}>
+                  {formatPrice(sub.price, sub.currency)}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+          {activeSubscriptions.length > 6 && (
+            <Text style={styles.moreText}>
+              他 {activeSubscriptions.length - 6} 件
+            </Text>
+          )}
         </View>
       )}
 
-      <TouchableOpacity
-        style={styles.scanButton}
-        onPress={() => navigation.navigate('ScanEmail')}
-      >
-        <Icon name="email-search" size={24} color={theme.colors.primary} />
-        <Text style={styles.scanButtonText}>メールからサブスクを検出</Text>
-      </TouchableOpacity>
+      {/* 支払い履歴カード */}
+      {totalPaymentRecords > 0 && (
+        <TouchableOpacity
+          style={styles.historyCard}
+          onPress={() => navigation.navigate('PaymentHistory')}
+        >
+          <View style={styles.historyCardLeft}>
+            <Icon name="chart-line" size={24} color={theme.colors.primary} />
+            <View style={styles.historyCardInfo}>
+              <Text style={styles.historyCardTitle}>支払い履歴</Text>
+              <Text style={styles.historyCardSubtitle}>
+                {totalPaymentRecords}件の支払い記録
+              </Text>
+            </View>
+          </View>
+          <Icon name="chevron-right" size={24} color={theme.colors.textSecondary} />
+        </TouchableOpacity>
+      )}
 
-      <TouchableOpacity
-        style={styles.addButton}
-        onPress={() => navigation.navigate('AddSubscription')}
-      >
-        <Icon name="plus" size={24} color="#FFFFFF" />
-        <Text style={styles.addButtonText}>サブスクを追加</Text>
-      </TouchableOpacity>
+      <View style={styles.bottomSpacer} />
     </ScrollView>
   );
 }
@@ -225,105 +244,117 @@ const createStyles = (theme: ReturnType<typeof useTheme>) =>
       flex: 1,
       backgroundColor: theme.colors.background,
     },
-    summaryContainer: {
+    mainCard: {
+      backgroundColor: theme.colors.primary,
+      margin: 16,
+      borderRadius: 20,
+      padding: 24,
+    },
+    mainCardLabel: {
+      fontSize: 14,
+      color: 'rgba(255,255,255,0.8)',
+      marginBottom: 4,
+    },
+    mainCardAmount: {
+      fontSize: 36,
+      fontWeight: '700',
+      color: '#FFFFFF',
+    },
+    mainCardDivider: {
+      height: 1,
+      backgroundColor: 'rgba(255,255,255,0.2)',
+      marginVertical: 16,
+    },
+    mainCardRow: {
       flexDirection: 'row',
-      padding: 16,
+      alignItems: 'center',
+    },
+    mainCardStat: {
+      flex: 1,
+      alignItems: 'center',
+    },
+    mainCardStatDivider: {
+      width: 1,
+      height: 32,
+      backgroundColor: 'rgba(255,255,255,0.2)',
+    },
+    mainCardStatValue: {
+      fontSize: 18,
+      fontWeight: '600',
+      color: '#FFFFFF',
+    },
+    mainCardStatLabel: {
+      fontSize: 12,
+      color: 'rgba(255,255,255,0.7)',
+      marginTop: 2,
+    },
+    quickActions: {
+      flexDirection: 'row',
+      paddingHorizontal: 16,
+      marginBottom: 24,
       gap: 12,
     },
-    summaryCard: {
+    quickActionButton: {
       flex: 1,
       backgroundColor: theme.colors.card,
       borderRadius: 16,
-      padding: 20,
+      padding: 16,
       alignItems: 'center',
     },
-    summaryLabel: {
-      fontSize: 14,
-      color: theme.colors.textSecondary,
+    quickActionIcon: {
+      width: 44,
+      height: 44,
+      borderRadius: 12,
+      alignItems: 'center',
+      justifyContent: 'center',
       marginBottom: 8,
     },
-    summaryAmount: {
-      fontSize: 24,
-      fontWeight: '700',
-      color: theme.colors.text,
-    },
-    statsRow: {
-      flexDirection: 'row',
-      paddingHorizontal: 16,
-      gap: 12,
-      marginBottom: 16,
-    },
-    statCard: {
-      flex: 1,
-      backgroundColor: theme.colors.card,
-      borderRadius: 12,
-      padding: 16,
-      alignItems: 'center',
-    },
-    statNumber: {
-      fontSize: 28,
-      fontWeight: '700',
-      color: theme.colors.text,
-      marginTop: 8,
-    },
-    statLabel: {
+    quickActionText: {
       fontSize: 12,
-      color: theme.colors.textSecondary,
-      marginTop: 4,
-    },
-    paymentSummaryContainer: {
-      flexDirection: 'row',
-      paddingHorizontal: 16,
-      gap: 12,
-      marginBottom: 16,
-    },
-    paymentSummaryCard: {
-      flex: 1,
-      backgroundColor: theme.colors.card,
-      borderRadius: 12,
-      padding: 16,
-    },
-    paymentSummaryHeader: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 8,
-      marginBottom: 12,
-    },
-    paymentSummaryTitle: {
-      fontSize: 14,
       fontWeight: '600',
-      color: theme.colors.textSecondary,
-    },
-    paymentSummaryAmount: {
-      fontSize: 22,
-      fontWeight: '700',
       color: theme.colors.text,
-      marginBottom: 4,
-    },
-    paymentSummarySubtext: {
-      fontSize: 12,
-      color: theme.colors.textSecondary,
+      textAlign: 'center',
+      lineHeight: 16,
     },
     section: {
-      padding: 16,
+      paddingHorizontal: 16,
+      marginBottom: 24,
+    },
+    sectionHeader: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      marginBottom: 12,
+      gap: 8,
     },
     sectionTitle: {
       fontSize: 18,
-      fontWeight: '600',
+      fontWeight: '700',
       color: theme.colors.text,
-      marginBottom: 12,
+    },
+    badge: {
+      backgroundColor: theme.colors.primary,
+      paddingHorizontal: 8,
+      paddingVertical: 2,
+      borderRadius: 10,
+    },
+    badgeText: {
+      fontSize: 12,
+      fontWeight: '600',
+      color: '#FFFFFF',
+    },
+    upcomingList: {
+      gap: 8,
     },
     upcomingCard: {
       flexDirection: 'row',
       alignItems: 'center',
       backgroundColor: theme.colors.card,
-      borderRadius: 12,
-      padding: 16,
-      marginBottom: 8,
+      borderRadius: 14,
+      padding: 14,
     },
-    upcomingIcon: {
-      width: 40,
-      height: 40,
+    upcomingIconContainer: {
+      width: 36,
+      height: 36,
       borderRadius: 10,
       alignItems: 'center',
       justifyContent: 'center',
@@ -333,117 +364,116 @@ const createStyles = (theme: ReturnType<typeof useTheme>) =>
       marginLeft: 12,
     },
     upcomingName: {
-      fontSize: 16,
+      fontSize: 15,
       fontWeight: '600',
       color: theme.colors.text,
     },
-    upcomingCategory: {
-      fontSize: 13,
+    upcomingMeta: {
+      fontSize: 12,
       color: theme.colors.textSecondary,
       marginTop: 2,
     },
     upcomingRight: {
       alignItems: 'flex-end',
+      gap: 4,
     },
     upcomingPrice: {
-      fontSize: 16,
-      fontWeight: '600',
+      fontSize: 15,
+      fontWeight: '700',
       color: theme.colors.text,
     },
-    upcomingDays: {
-      fontSize: 13,
-      color: theme.colors.textSecondary,
-      marginTop: 2,
+    daysTag: {
+      backgroundColor: theme.colors.background,
+      paddingHorizontal: 8,
+      paddingVertical: 3,
+      borderRadius: 6,
     },
-    emptyState: {
+    daysTagUrgent: {
+      backgroundColor: '#FFEBEE',
+    },
+    daysTagText: {
+      fontSize: 11,
+      fontWeight: '600',
+      color: theme.colors.textSecondary,
+    },
+    daysTagTextUrgent: {
+      color: '#D32F2F',
+    },
+    emptyCard: {
+      backgroundColor: theme.colors.card,
+      borderRadius: 14,
+      padding: 32,
       alignItems: 'center',
-      paddingVertical: 40,
     },
     emptyText: {
       fontSize: 14,
       color: theme.colors.textSecondary,
       marginTop: 12,
     },
-    scanButton: {
+    subscriptionGrid: {
       flexDirection: 'row',
+      flexWrap: 'wrap',
+      gap: 10,
+    },
+    subscriptionMini: {
+      width: (width - 32 - 20) / 3,
+      backgroundColor: theme.colors.card,
+      borderRadius: 14,
+      padding: 12,
+      alignItems: 'center',
+    },
+    subscriptionMiniIcon: {
+      width: 40,
+      height: 40,
+      borderRadius: 12,
       alignItems: 'center',
       justifyContent: 'center',
-      backgroundColor: theme.colors.card,
-      marginHorizontal: 16,
-      marginBottom: 12,
-      padding: 16,
-      borderRadius: 12,
-      gap: 8,
-      borderWidth: 1,
-      borderColor: theme.colors.primary,
-    },
-    scanButtonText: {
-      color: theme.colors.primary,
-      fontSize: 16,
-      fontWeight: '600',
-    },
-    addButton: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'center',
-      backgroundColor: theme.colors.primary,
-      marginHorizontal: 16,
-      marginBottom: 32,
-      padding: 16,
-      borderRadius: 12,
-      gap: 8,
-    },
-    addButtonText: {
-      color: '#FFFFFF',
-      fontSize: 16,
-      fontWeight: '600',
-    },
-    monthlyCard: {
-      backgroundColor: theme.colors.card,
-      borderRadius: 12,
-      padding: 16,
       marginBottom: 8,
     },
-    monthlyHeader: {
-      flexDirection: 'row',
-      justifyContent: 'space-between',
-      alignItems: 'center',
+    subscriptionMiniName: {
+      fontSize: 12,
+      fontWeight: '600',
+      color: theme.colors.text,
+      textAlign: 'center',
+      marginBottom: 4,
     },
-    monthlyLabel: {
+    subscriptionMiniPrice: {
+      fontSize: 11,
+      color: theme.colors.textSecondary,
+    },
+    moreText: {
+      fontSize: 13,
+      color: theme.colors.textSecondary,
+      textAlign: 'center',
+      marginTop: 12,
+    },
+    historyCard: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      backgroundColor: theme.colors.card,
+      marginHorizontal: 16,
+      borderRadius: 14,
+      padding: 16,
+    },
+    historyCardLeft: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 12,
+    },
+    historyCardInfo: {
+      gap: 2,
+    },
+    historyCardTitle: {
       fontSize: 15,
       fontWeight: '600',
       color: theme.colors.text,
     },
-    monthlyTotal: {
-      fontSize: 16,
-      fontWeight: '700',
-      color: theme.colors.primary,
-    },
-    monthlyDetails: {
-      marginTop: 12,
-      paddingTop: 12,
-      borderTopWidth: 1,
-      borderTopColor: theme.colors.border,
-    },
-    monthlyDetailRow: {
-      flexDirection: 'row',
-      justifyContent: 'space-between',
-      alignItems: 'center',
-      paddingVertical: 4,
-    },
-    monthlyDetailName: {
+    historyCardSubtitle: {
       fontSize: 13,
       color: theme.colors.textSecondary,
     },
-    monthlyDetailPrice: {
-      fontSize: 13,
-      fontWeight: '500',
-      color: theme.colors.text,
-    },
-    monthlyMore: {
-      fontSize: 12,
-      color: theme.colors.textSecondary,
-      textAlign: 'center',
-      marginTop: 8,
+    bottomSpacer: {
+      height: 32,
     },
   });
