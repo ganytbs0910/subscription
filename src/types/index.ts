@@ -71,10 +71,12 @@ export type RootStackParamList = {
   AddSubscription: { presetService?: PopularService } | undefined;
   EditSubscription: { subscriptionId: string };
   ScanEmail: undefined;
+  PaymentHistory: undefined;
 };
 
 export type MainTabParamList = {
   Dashboard: undefined;
   Subscriptions: undefined;
+  PaymentHistory: undefined;
   Settings: undefined;
 };

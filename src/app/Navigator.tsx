@@ -13,6 +13,7 @@ import SubscriptionDetailScreen from '../screens/subscriptions/SubscriptionDetai
 import AddSubscriptionScreen from '../screens/subscriptions/AddSubscriptionScreen';
 import SettingsScreen from '../screens/settings/SettingsScreen';
 import ScanEmailScreen from '../screens/scan/ScanEmailScreen';
+import PaymentHistoryScreen from '../screens/history/PaymentHistoryScreen';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 const Tab = createBottomTabNavigator<MainTabParamList>();
@@ -49,9 +50,19 @@ function MainTabs() {
         name="Subscriptions"
         component={SubscriptionListScreen}
         options={{
-          title: 'サブスク一覧',
+          title: 'サブスク',
           tabBarIcon: ({ color, size }) => (
             <Icon name="format-list-bulleted" color={color} size={size} />
+          ),
+        }}
+      />
+      <Tab.Screen
+        name="PaymentHistory"
+        component={PaymentHistoryScreen}
+        options={{
+          title: '課金履歴',
+          tabBarIcon: ({ color, size }) => (
+            <Icon name="receipt" color={color} size={size} />
           ),
         }}
       />
@@ -125,6 +136,11 @@ export default function Navigator() {
           name="ScanEmail"
           component={ScanEmailScreen}
           options={{ title: 'メールスキャン' }}
+        />
+        <Stack.Screen
+          name="PaymentHistory"
+          component={PaymentHistoryScreen}
+          options={{ title: '支払い履歴' }}
         />
       </Stack.Navigator>
     </NavigationContainer>
