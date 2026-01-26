@@ -6,7 +6,7 @@ import { z } from 'zod';
 const requestSchema = z.object({
   email: z.string().email(),
   appPassword: z.string().min(1),
-  maxResults: z.number().min(1).max(100).optional().default(50),
+  maxResults: z.number().min(1).max(500).optional().default(200),
 });
 
 type Category =
@@ -164,6 +164,94 @@ function extractBillingCycle(text: string): BillingCycle | null {
   return null;
 }
 
+// Apple領収書かどうかを判定
+function isAppleReceipt(from: string, subject: string): boolean {
+  const isFromApple = /no_reply@email\.apple\.com/i.test(from);
+  const isReceipt = /領収書|receipt/i.test(subject);
+  return isFromApple && isReceipt;
+}
+
+// Apple領収書から複数のアプリ課金を抽出
+interface AppleAppPurchase {
+  appName: string;
+  itemName: string;
+  price: number;
+  isSubscription: boolean;
+}
+
+function parseAppleReceipt(body: string): AppleAppPurchase[] {
+  const purchases: AppleAppPurchase[] = [];
+
+  // HTMLタグを除去してテキスト化
+  const text = body
+    .replace(/<[^>]+>/g, '\n')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&#165;/g, '¥')
+    .replace(/&yen;/g, '¥')
+    .replace(/\r\n/g, '\n')
+    .replace(/\r/g, '\n');
+
+  const lines = text.split('\n').map(l => l.trim()).filter(l => l);
+
+  console.log(`[parseAppleReceipt] Processing ${lines.length} lines`);
+
+  let currentApp = '';
+  let currentItem = '';
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+
+    // 金額行を検出 (¥XXX または 「問題を報告する ¥XXX」形式)
+    let priceMatch = line.match(/[¥￥]\s*([\d,]+)/);
+
+    if (priceMatch && currentApp) {
+      const price = parseInt(priceMatch[1].replace(/,/g, ''), 10);
+
+      // 税金行や小計行は除外
+      if (/JCT|税|小計|合計|を含む/i.test(line)) {
+        continue;
+      }
+
+      if (price > 0 && price < 50000) { // 妥当な範囲（50000円未満）
+        const contextText = `${currentApp} ${currentItem}`;
+        const isSubscription = /月額|年額|Pass|Premium|Plus|Pro|subscription|monthly|yearly/i.test(contextText);
+
+        console.log(`[parseAppleReceipt] Found: ${currentApp} - ¥${price}`);
+
+        purchases.push({
+          appName: currentApp,
+          itemName: currentItem,
+          price,
+          isSubscription,
+        });
+
+        currentApp = '';
+        currentItem = '';
+      }
+      continue;
+    }
+
+    // 除外パターン
+    if (/^(日付|ご注文番号|書類番号|請求先|更新|APPLE|Amex|Visa|JCB|Mastercard|\d{4}年|@|JPN|問題を報告)/i.test(line)) {
+      continue;
+    }
+
+    // アプリ名/アイテム名の候補
+    if (line.length > 1 && line.length < 100) {
+      // アイテム名っぽい行（大文字英語や「月額」「アプリ内課金」を含む）
+      if (/[A-Z]{2,}|月額|年額|アプリ内課金|Pass|Premium|Plus|Pro|Upgrade/i.test(line)) {
+        currentItem = line;
+      } else if (!currentApp || currentItem) {
+        // 新しいアプリ名
+        currentApp = line;
+        currentItem = '';
+      }
+    }
+  }
+
+  return purchases;
+}
+
 function parseEmailForSubscription(
   subject: string,
   from: string,
@@ -196,6 +284,61 @@ function parseEmailForSubscription(
   }
 
   return null;
+}
+
+// 1つのメールから複数の課金を抽出
+function parseEmailForSubscriptions(
+  subject: string,
+  from: string,
+  body: string,
+  date: Date,
+): DetectedSubscription[] {
+  const results: DetectedSubscription[] = [];
+
+  // Apple領収書の場合は専用パーサーを使用
+  if (isAppleReceipt(from, subject)) {
+    console.log(`[iCloud] Apple receipt detected: ${subject}`);
+    const purchases = parseAppleReceipt(body);
+
+    for (const purchase of purchases) {
+      // アプリ名で既知のサービスを検索
+      let category: Category = 'other';
+      let serviceName = purchase.appName;
+
+      for (const service of SERVICE_PATTERNS) {
+        if (service.pattern.test(purchase.appName) || service.pattern.test(purchase.itemName)) {
+          serviceName = service.name;
+          category = service.category;
+          break;
+        }
+      }
+
+      const billingCycle = purchase.isSubscription ? 'monthly' as BillingCycle : null;
+
+      results.push({
+        name: serviceName,
+        category,
+        price: purchase.price,
+        currency: 'JPY',
+        billingCycle,
+        email: from,
+        detectedDate: date.toISOString(),
+        confidence: 0.85,
+      });
+    }
+
+    if (results.length > 0) {
+      return results;
+    }
+  }
+
+  // 通常のパース
+  const single = parseEmailForSubscription(subject, from, body, date);
+  if (single) {
+    results.push(single);
+  }
+
+  return results;
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -233,36 +376,62 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const seenServices = new Set<string>();
 
     try {
-      // Search for subscription-related emails
-      const searchQuery = {
+      // 課金メールを送る主要な送信者で検索
+      const senderSearchQuery = {
+        or: [
+          { from: 'no_reply@email.apple.com' },      // Apple
+          { from: 'noreply@youtube.com' },           // YouTube
+          { from: 'googleplay-noreply@google.com' }, // Google Play
+          { from: 'auto-confirm@amazon' },           // Amazon
+          { from: 'digital-no-reply@amazon' },       // Amazon Digital
+        ],
+      };
+
+      // 件名での検索（バックアップ）
+      const subjectSearchQuery = {
         or: [
           { subject: 'receipt' },
           { subject: 'invoice' },
           { subject: '領収' },
           { subject: '請求' },
-          { subject: 'subscription' },
-          { subject: 'サブスクリプション' },
-          { subject: '月額' },
-          { subject: '年額' },
-          { subject: 'renewal' },
-          { subject: '更新' },
         ],
       };
 
       const messages: number[] = [];
-      for await (const msg of client.fetch(searchQuery, { uid: true })) {
-        messages.push(msg.uid);
-        if (messages.length >= maxResults) break;
-      }
+      const seenUids = new Set<number>();
 
-      // If no search results, fetch recent messages
-      if (messages.length === 0) {
-        const range = `${Math.max(1, client.mailbox?.exists || 1 - maxResults)}:*`;
-        for await (const msg of client.fetch(range, { uid: true })) {
-          messages.push(msg.uid);
+      // 1. まず送信者で検索（課金メールの送信者）
+      console.log('[iCloud] Searching by sender...');
+      try {
+        for await (const msg of client.fetch(senderSearchQuery, { uid: true })) {
+          if (!seenUids.has(msg.uid)) {
+            seenUids.add(msg.uid);
+            messages.push(msg.uid);
+          }
           if (messages.length >= maxResults) break;
         }
+      } catch (e) {
+        console.log('[iCloud] Sender search failed, trying subject search');
       }
+
+      console.log(`[iCloud] Found ${messages.length} emails by sender`);
+
+      // 2. 件名で追加検索
+      if (messages.length < maxResults) {
+        try {
+          for await (const msg of client.fetch(subjectSearchQuery, { uid: true })) {
+            if (!seenUids.has(msg.uid)) {
+              seenUids.add(msg.uid);
+              messages.push(msg.uid);
+            }
+            if (messages.length >= maxResults) break;
+          }
+        } catch (e) {
+          console.log('[iCloud] Subject search failed');
+        }
+      }
+
+      console.log(`[iCloud] Total emails to process: ${messages.length}`);
 
       // Fetch full message content
       for (const uid of messages.slice(0, maxResults)) {
@@ -279,11 +448,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             const body = parsed.text || parsed.html?.replace(/<[^>]*>/g, ' ') || '';
             const date = parsed.date || new Date();
 
-            const subscription = parseEmailForSubscription(subject, from, body, date);
+            console.log(`[iCloud] Processing: ${subject.substring(0, 50)} from ${from.substring(0, 30)}`);
 
-            if (subscription && !seenServices.has(subscription.name)) {
-              seenServices.add(subscription.name);
-              detected.push(subscription);
+            // 複数の課金を抽出（Apple領収書対応）
+            const subscriptions = parseEmailForSubscriptions(subject, from, body, date);
+
+            for (const subscription of subscriptions) {
+              if (!seenServices.has(subscription.name)) {
+                seenServices.add(subscription.name);
+                detected.push(subscription);
+                console.log(`[iCloud] Detected: ${subscription.name} - ${subscription.price} ${subscription.currency}`);
+              }
             }
           }
         } catch (parseError) {
