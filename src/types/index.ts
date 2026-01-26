@@ -16,6 +16,21 @@ export interface PaymentRecord {
   price: number;
   currency: string;
   subject?: string;
+  itemName?: string;  // 購入アイテム名（例: エメラルド950個）
+}
+
+// 個別の購入記録
+export interface SubItemPurchase {
+  date: string;
+  price: number;
+}
+
+// アイテム別内訳
+export interface SubItem {
+  name: string;
+  currency: string;
+  purchases: SubItemPurchase[];
+  totalPaid: number;
 }
 
 export interface Subscription {
@@ -37,6 +52,8 @@ export interface Subscription {
   paymentHistory?: PaymentRecord[];
   // メールから検出された実際の累計支払い額
   totalPaidFromEmail?: number;
+  // アイテム別内訳
+  subItems?: SubItem[];
 }
 
 export interface SubscriptionFormData {

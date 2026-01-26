@@ -16,6 +16,7 @@ import type { PaymentRecord } from '../../types';
 interface PaymentWithService extends PaymentRecord {
   serviceName: string;
   serviceId: string;
+  itemName?: string;
 }
 
 type ViewMode = 'byMonth' | 'byService';
@@ -35,6 +36,7 @@ export default function PaymentHistoryScreen() {
             ...payment,
             serviceName: sub.name,
             serviceId: sub.id,
+            itemName: payment.itemName,
           });
         });
       }
@@ -72,17 +74,26 @@ export default function PaymentHistoryScreen() {
       });
   }, [allPayments]);
 
-  // サービス別データ
+  // サービス別データ（アイテム別にグループ化）
   const serviceData = useMemo(() => {
-    const serviceMap = new Map<string, { payments: PaymentWithService[]; total: number }>();
+    // サービス名 -> アイテム名 -> 支払いリスト
+    const serviceMap = new Map<string, {
+      items: Map<string, PaymentWithService[]>;
+      total: number;
+    }>();
 
     allPayments.forEach(payment => {
       if (!serviceMap.has(payment.serviceName)) {
-        serviceMap.set(payment.serviceName, { payments: [], total: 0 });
+        serviceMap.set(payment.serviceName, { items: new Map(), total: 0 });
       }
-      const data = serviceMap.get(payment.serviceName)!;
-      data.payments.push(payment);
-      data.total += payment.currency === 'USD' ? payment.price * 150 : payment.price;
+      const service = serviceMap.get(payment.serviceName)!;
+      const itemName = payment.itemName || '(不明)';
+
+      if (!service.items.has(itemName)) {
+        service.items.set(itemName, []);
+      }
+      service.items.get(itemName)!.push(payment);
+      service.total += payment.currency === 'USD' ? payment.price * 150 : payment.price;
     });
 
     return Array.from(serviceMap.entries())
@@ -90,7 +101,11 @@ export default function PaymentHistoryScreen() {
       .map(([name, data]) => ({
         key: name,
         label: name,
-        ...data,
+        items: Array.from(data.items.entries()).map(([itemName, payments]) => ({
+          itemName,
+          payments: payments.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()),
+        })),
+        total: data.total,
       }));
   }, [allPayments]);
 
@@ -101,7 +116,6 @@ export default function PaymentHistoryScreen() {
   }, [allPayments]);
 
   const styles = createStyles(theme);
-  const data = viewMode === 'byMonth' ? monthlyData : serviceData;
 
   if (allPayments.length === 0) {
     return (
@@ -163,40 +177,75 @@ export default function PaymentHistoryScreen() {
 
       {/* リスト */}
       <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
-        {data.map((section) => (
-          <View key={section.key} style={styles.section}>
-            {/* セクションヘッダー */}
-            <View style={styles.sectionHeader}>
-              <Text style={styles.sectionTitle}>{section.label}</Text>
-              <Text style={styles.sectionTotal}>
-                {formatPrice(section.total, 'JPY')}
-              </Text>
-            </View>
-
-            {/* 支払いアイテム */}
-            <View style={styles.itemsContainer}>
-              {section.payments.map((payment, index) => (
-                <View
-                  key={`${payment.serviceId}-${payment.date}-${index}`}
-                  style={[
-                    styles.paymentItem,
-                    index === section.payments.length - 1 && styles.paymentItemLast,
-                  ]}
-                >
-                  <View style={styles.paymentLeft}>
-                    {viewMode === 'byMonth' && (
+        {viewMode === 'byMonth' ? (
+          // 月別表示
+          monthlyData.map((section) => (
+            <View key={section.key} style={styles.section}>
+              <View style={styles.sectionHeader}>
+                <Text style={styles.sectionTitle}>{section.label}</Text>
+                <Text style={styles.sectionTotal}>
+                  {formatPrice(section.total, 'JPY')}
+                </Text>
+              </View>
+              <View style={styles.itemsContainer}>
+                {section.payments.map((payment, index) => (
+                  <View
+                    key={`${payment.serviceId}-${payment.date}-${index}`}
+                    style={[
+                      styles.paymentItem,
+                      index === section.payments.length - 1 && styles.paymentItemLast,
+                    ]}
+                  >
+                    <View style={styles.paymentLeft}>
                       <Text style={styles.paymentService}>{payment.serviceName}</Text>
-                    )}
-                    <Text style={styles.paymentDate}>{formatDate(payment.date)}</Text>
+                      <Text style={styles.paymentDate}>{formatDate(payment.date)}</Text>
+                    </View>
+                    <Text style={styles.paymentPrice}>
+                      {formatPrice(payment.price, payment.currency)}
+                    </Text>
                   </View>
-                  <Text style={styles.paymentPrice}>
-                    {formatPrice(payment.price, payment.currency)}
-                  </Text>
-                </View>
-              ))}
+                ))}
+              </View>
             </View>
-          </View>
-        ))}
+          ))
+        ) : (
+          // サービス別表示（アイテムごとにグループ化）
+          serviceData.map((service) => (
+            <View key={service.key} style={styles.section}>
+              {/* サービス名ヘッダー */}
+              <View style={styles.sectionHeader}>
+                <Text style={styles.sectionTitle}>{service.label}</Text>
+                <Text style={styles.sectionTotal}>
+                  {formatPrice(service.total, 'JPY')}
+                </Text>
+              </View>
+              <View style={styles.itemsContainer}>
+                {service.items.map((item, itemIndex) => (
+                  <View key={item.itemName} style={styles.itemGroup}>
+                    {/* アイテム名 */}
+                    <Text style={styles.itemName}>{item.itemName}</Text>
+                    {/* 購入履歴 */}
+                    {item.payments.map((payment, paymentIndex) => (
+                      <View
+                        key={`${payment.date}-${paymentIndex}`}
+                        style={styles.itemPayment}
+                      >
+                        <Text style={styles.itemPaymentDate}>{formatDate(payment.date)}</Text>
+                        <Text style={styles.itemPaymentPrice}>
+                          {formatPrice(payment.price, payment.currency)}
+                        </Text>
+                      </View>
+                    ))}
+                    {/* アイテム間の区切り線 */}
+                    {itemIndex < service.items.length - 1 && (
+                      <View style={styles.itemDivider} />
+                    )}
+                  </View>
+                ))}
+              </View>
+            </View>
+          ))
+        )}
         <View style={styles.bottomSpacer} />
       </ScrollView>
     </View>
@@ -345,6 +394,37 @@ const createStyles = (theme: ReturnType<typeof useTheme>) =>
       fontSize: 15,
       fontWeight: '600',
       color: theme.colors.text,
+    },
+    // アイテムグループ（サービス別表示用）
+    itemGroup: {
+      paddingHorizontal: 16,
+      paddingVertical: 12,
+    },
+    itemName: {
+      fontSize: 14,
+      fontWeight: '600',
+      color: theme.colors.text,
+      marginBottom: 6,
+    },
+    itemPayment: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      paddingLeft: 8,
+      paddingVertical: 4,
+    },
+    itemPaymentDate: {
+      fontSize: 13,
+      color: theme.colors.textSecondary,
+    },
+    itemPaymentPrice: {
+      fontSize: 13,
+      color: theme.colors.text,
+    },
+    itemDivider: {
+      height: 1,
+      backgroundColor: theme.colors.border,
+      marginTop: 12,
     },
     bottomSpacer: {
       height: 32,

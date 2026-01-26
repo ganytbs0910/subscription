@@ -39,7 +39,11 @@
       "Bash(xcrun simctl launch:*)",
       "Bash(curl:*)",
       "Bash(xcrun simctl install:*)",
-      "Bash(open:*)"
+      "Bash(open:*)",
+      "Bash(npx expo start:*)",
+      "Bash(npm run start:*)",
+      "Bash(ls:*)",
+      "Bash(python3:*)"
     ]
   }
 }

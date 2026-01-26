@@ -1,5 +1,5 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { ImapFlow, FetchMessageObject } from 'imapflow';
+import { ImapFlow } from 'imapflow';
 import { simpleParser, ParsedMail } from 'mailparser';
 import { z } from 'zod';
 
@@ -22,28 +22,60 @@ type Category =
 
 type BillingCycle = 'monthly' | 'yearly' | 'weekly' | 'quarterly';
 
+interface PaymentRecord {
+  date: string;
+  price: number;
+  currency: string;
+  subject: string;
+}
+
+// 個別の購入記録
+interface SubItemPurchase {
+  date: string;           // 購入日
+  price: number;          // 金額
+}
+
+// サブアイテム（アイテム別内訳）
+interface SubItem {
+  name: string;           // アイテム名
+  currency: string;
+  purchases: SubItemPurchase[];  // 個別の購入履歴
+  totalPaid: number;      // このアイテムの累計
+}
+
 interface DetectedSubscription {
   name: string;
   category: Category;
   price: number | null;
   currency: string;
   billingCycle: BillingCycle | null;
+  nextBillingDate: string | null;
   email: string;
   detectedDate: string;
   confidence: number;
+  priceDetected: boolean;
+  isBilling: boolean;
+  extractedByAI?: boolean;
+  paymentHistory: PaymentRecord[];
+  totalPaid: number;
+  paymentCount: number;
+  subItems?: SubItem[];   // アイテム別内訳
 }
 
 interface ServicePattern {
   pattern: RegExp;
   name: string;
   category: Category;
+  senderPatterns?: RegExp[];
+  subjectPatterns?: RegExp[];
 }
 
+// 統合されたサービスパターン（送信者パターン付き）
 const SERVICE_PATTERNS: ServicePattern[] = [
   // Streaming
-  { pattern: /netflix/i, name: 'Netflix', category: 'streaming' },
-  { pattern: /disney\+|disneyplus/i, name: 'Disney+', category: 'streaming' },
-  { pattern: /hulu/i, name: 'Hulu', category: 'streaming' },
+  { pattern: /netflix/i, name: 'Netflix', category: 'streaming', senderPatterns: [/@netflix\.com/i, /netflix/i], subjectPatterns: [/netflix/i] },
+  { pattern: /disney\+|disneyplus/i, name: 'Disney+', category: 'streaming', senderPatterns: [/@disney/i, /@disneyplus/i], subjectPatterns: [/disney\+|disneyplus/i] },
+  { pattern: /hulu/i, name: 'Hulu', category: 'streaming', senderPatterns: [/@hulu\.(com|jp)/i], subjectPatterns: [/hulu/i] },
   { pattern: /amazon\s*prime\s*video|prime\s*video/i, name: 'Amazon Prime Video', category: 'streaming' },
   { pattern: /u-next|unext/i, name: 'U-NEXT', category: 'streaming' },
   { pattern: /abema/i, name: 'ABEMA', category: 'streaming' },
@@ -51,12 +83,12 @@ const SERVICE_PATTERNS: ServicePattern[] = [
   { pattern: /crunchyroll/i, name: 'Crunchyroll', category: 'streaming' },
   { pattern: /hbo\s*max/i, name: 'HBO Max', category: 'streaming' },
   { pattern: /paramount\+|paramountplus/i, name: 'Paramount+', category: 'streaming' },
-  { pattern: /youtube\s*premium/i, name: 'YouTube Premium', category: 'streaming' },
-  { pattern: /apple\s*tv\+?/i, name: 'Apple TV+', category: 'streaming' },
+  { pattern: /youtube\s*premium/i, name: 'YouTube Premium', category: 'streaming', senderPatterns: [/@youtube\.com/i, /@google\.com/i], subjectPatterns: [/youtube\s*premium/i] },
+  { pattern: /apple\s*tv\+?/i, name: 'Apple TV+', category: 'streaming', senderPatterns: [/@apple\.com/i, /@itunes\.com/i, /@email\.apple\.com/i, /no_reply@.*apple/i], subjectPatterns: [/apple\s*tv\+|apple\s*tv\s*plus/i] },
 
   // Music
-  { pattern: /spotify/i, name: 'Spotify', category: 'music' },
-  { pattern: /apple\s*music/i, name: 'Apple Music', category: 'music' },
+  { pattern: /spotify/i, name: 'Spotify', category: 'music', senderPatterns: [/@spotify\.com/i, /spotify/i], subjectPatterns: [/spotify/i] },
+  { pattern: /apple\s*music/i, name: 'Apple Music', category: 'music', senderPatterns: [/@apple\.com/i, /@itunes\.com/i, /@email\.apple\.com/i, /no_reply@.*apple/i], subjectPatterns: [/apple\s*music/i] },
   { pattern: /youtube\s*music/i, name: 'YouTube Music', category: 'music' },
   { pattern: /amazon\s*music/i, name: 'Amazon Music', category: 'music' },
   { pattern: /line\s*music/i, name: 'LINE MUSIC', category: 'music' },
@@ -65,10 +97,10 @@ const SERVICE_PATTERNS: ServicePattern[] = [
   { pattern: /deezer/i, name: 'Deezer', category: 'music' },
 
   // Productivity
-  { pattern: /notion/i, name: 'Notion', category: 'productivity' },
-  { pattern: /slack/i, name: 'Slack', category: 'productivity' },
-  { pattern: /zoom/i, name: 'Zoom', category: 'productivity' },
-  { pattern: /microsoft\s*365|office\s*365/i, name: 'Microsoft 365', category: 'productivity' },
+  { pattern: /notion/i, name: 'Notion', category: 'productivity', senderPatterns: [/@notion\.so/i, /@makenotion\.com/i], subjectPatterns: [/notion/i] },
+  { pattern: /slack/i, name: 'Slack', category: 'productivity', senderPatterns: [/@slack\.com/i], subjectPatterns: [/slack/i] },
+  { pattern: /zoom/i, name: 'Zoom', category: 'productivity', senderPatterns: [/@zoom\.(us|com)/i], subjectPatterns: [/zoom\s*(pro|business|enterprise|領収|invoice|receipt|請求)/i] },
+  { pattern: /microsoft\s*365|office\s*365/i, name: 'Microsoft 365', category: 'productivity', senderPatterns: [/@microsoft\.com/i, /@office\.com/i], subjectPatterns: [/microsoft\s*365|office\s*365/i] },
   { pattern: /evernote/i, name: 'Evernote', category: 'productivity' },
   { pattern: /todoist/i, name: 'Todoist', category: 'productivity' },
   { pattern: /1password|one\s*password/i, name: '1Password', category: 'productivity' },
@@ -77,18 +109,18 @@ const SERVICE_PATTERNS: ServicePattern[] = [
   { pattern: /canva/i, name: 'Canva', category: 'productivity' },
 
   // Cloud
-  { pattern: /dropbox/i, name: 'Dropbox', category: 'cloud' },
+  { pattern: /dropbox/i, name: 'Dropbox', category: 'cloud', senderPatterns: [/@dropbox\.com/i], subjectPatterns: [/dropbox/i] },
   { pattern: /google\s*(one|drive|storage)/i, name: 'Google One', category: 'cloud' },
-  { pattern: /icloud/i, name: 'iCloud+', category: 'cloud' },
+  { pattern: /icloud\+?(?:\s*ストレージ)?/i, name: 'iCloud+', category: 'cloud', senderPatterns: [/@apple\.com/i, /@itunes\.com/i, /@email\.apple\.com/i, /no_reply@.*apple/i], subjectPatterns: [/icloud\+|icloud\s*ストレージ|icloud\s*storage|icloud.*(?:領収|receipt|invoice|請求|支払|renewed)/i] },
   { pattern: /onedrive/i, name: 'OneDrive', category: 'cloud' },
   { pattern: /box\.com|box\s*storage/i, name: 'Box', category: 'cloud' },
 
   // Gaming
-  { pattern: /playstation\s*(plus|now)|ps\s*plus/i, name: 'PlayStation Plus', category: 'gaming' },
-  { pattern: /xbox\s*game\s*pass/i, name: 'Xbox Game Pass', category: 'gaming' },
-  { pattern: /nintendo\s*(switch\s*)?online/i, name: 'Nintendo Switch Online', category: 'gaming' },
+  { pattern: /playstation\s*(plus|now)|ps\s*plus/i, name: 'PlayStation Plus', category: 'gaming', senderPatterns: [/@playstation\.com/i, /@sony\.com/i], subjectPatterns: [/playstation\s*plus|ps\s*plus/i] },
+  { pattern: /xbox\s*game\s*pass/i, name: 'Xbox Game Pass', category: 'gaming', senderPatterns: [/@xbox\.com/i, /@microsoft\.com/i], subjectPatterns: [/xbox\s*game\s*pass/i] },
+  { pattern: /nintendo\s*(switch\s*)?online/i, name: 'Nintendo Switch Online', category: 'gaming', senderPatterns: [/@nintendo\.(com|co\.jp)/i], subjectPatterns: [/nintendo\s*switch\s*online|ニンテンドースイッチオンライン/i] },
   { pattern: /ea\s*play/i, name: 'EA Play', category: 'gaming' },
-  { pattern: /apple\s*arcade/i, name: 'Apple Arcade', category: 'gaming' },
+  { pattern: /apple\s*arcade/i, name: 'Apple Arcade', category: 'gaming', senderPatterns: [/@apple\.com/i, /@itunes\.com/i, /@email\.apple\.com/i, /no_reply@.*apple/i], subjectPatterns: [/apple\s*arcade/i] },
   { pattern: /geforce\s*now/i, name: 'GeForce NOW', category: 'gaming' },
 
   // News / Media
@@ -99,7 +131,7 @@ const SERVICE_PATTERNS: ServicePattern[] = [
   { pattern: /medium/i, name: 'Medium', category: 'news' },
 
   // Fitness
-  { pattern: /apple\s*fitness\+?/i, name: 'Apple Fitness+', category: 'fitness' },
+  { pattern: /apple\s*fitness\+?/i, name: 'Apple Fitness+', category: 'fitness', senderPatterns: [/@apple\.com/i, /@itunes\.com/i, /@email\.apple\.com/i, /no_reply@.*apple/i], subjectPatterns: [/apple\s*fitness\+|apple\s*fitness\s*plus/i] },
   { pattern: /strava/i, name: 'Strava', category: 'fitness' },
   { pattern: /peloton/i, name: 'Peloton', category: 'fitness' },
   { pattern: /nike\s*(training|run)/i, name: 'Nike Training', category: 'fitness' },
@@ -113,23 +145,51 @@ const SERVICE_PATTERNS: ServicePattern[] = [
   { pattern: /masterclass/i, name: 'MasterClass', category: 'education' },
 
   // Other / Design / Dev
-  { pattern: /adobe|creative\s*cloud/i, name: 'Adobe Creative Cloud', category: 'other' },
+  { pattern: /adobe|creative\s*cloud/i, name: 'Adobe Creative Cloud', category: 'other', senderPatterns: [/@adobe\.com/i], subjectPatterns: [/adobe|creative\s*cloud/i] },
   { pattern: /figma/i, name: 'Figma', category: 'other' },
   { pattern: /sketch/i, name: 'Sketch', category: 'other' },
-  { pattern: /github/i, name: 'GitHub', category: 'other' },
+  { pattern: /github/i, name: 'GitHub', category: 'other', senderPatterns: [/@github\.com/i], subjectPatterns: [/github\s*(pro|team|enterprise|receipt|invoice|領収|請求)/i] },
   { pattern: /gitlab/i, name: 'GitLab', category: 'other' },
-  { pattern: /chatgpt|openai/i, name: 'ChatGPT Plus', category: 'other' },
-  { pattern: /claude\s*(pro)?/i, name: 'Claude Pro', category: 'other' },
-  { pattern: /amazon\s*prime(?!\s*video)/i, name: 'Amazon Prime', category: 'other' },
-  { pattern: /apple\s*one/i, name: 'Apple One', category: 'other' },
+  { pattern: /chatgpt|openai/i, name: 'ChatGPT Plus', category: 'other', senderPatterns: [/@openai\.com/i], subjectPatterns: [/chatgpt|openai/i] },
+  { pattern: /claude\s*(pro)?/i, name: 'Claude Pro', category: 'other', senderPatterns: [/@anthropic\.com/i], subjectPatterns: [/claude|anthropic/i] },
+  { pattern: /amazon\s*prime(?!\s*video)/i, name: 'Amazon Prime', category: 'other', senderPatterns: [/@amazon\.(com|co\.jp)/i], subjectPatterns: [/amazon\s*prime|プライム会員/i] },
+  { pattern: /apple\s*one/i, name: 'Apple One', category: 'other', senderPatterns: [/@apple\.com/i, /@itunes\.com/i, /@email\.apple\.com/i, /no_reply@.*apple/i], subjectPatterns: [/apple\s*one/i] },
+  { pattern: /apple\s*news\+?/i, name: 'Apple News+', category: 'other', senderPatterns: [/@apple\.com/i, /@itunes\.com/i, /@email\.apple\.com/i, /no_reply@.*apple/i], subjectPatterns: [/apple\s*news\+|apple\s*news\s*plus/i] },
 ];
 
-const PRICE_PATTERNS = [
-  { pattern: /[¥￥]\s*([\d,]+)/, currency: 'JPY' },
-  { pattern: /([\d,]+)\s*円/, currency: 'JPY' },
-  { pattern: /JPY\s*([\d,]+)/, currency: 'JPY' },
-  { pattern: /\$\s*([\d.]+)/, currency: 'USD' },
-  { pattern: /USD\s*([\d.]+)/, currency: 'USD' },
+// ★ 厳格な請求メール判定キーワード（件名用）
+const BILLING_SUBJECT_KEYWORDS = [
+  /receipt/i, /invoice/i, /payment\s*confirm/i, /billing\s*statement/i,
+  /thank you for your (purchase|payment|order)/i, /order confirmation/i,
+  /領収書/i, /請求書/i, /ご利用明細/i, /お支払い完了/i, /決済完了/i,
+  /ご注文確認/i, /購入完了/i, /引き落とし/i, /課金完了/i,
+];
+
+// プロモーション・宣伝メールの除外パターン
+const PROMO_PATTERNS = [
+  /ご存じですか/i, /キャンペーン/i, /お得/i, /無料/i, /割引/i,
+  /おすすめ/i, /新機能/i, /アップグレード/i, /特別/i, /限定/i,
+  /did you know/i, /special offer/i, /upgrade/i, /free trial/i,
+  /% off/i, /save \$/i, /discount/i,
+];
+
+const PRICE_PATTERNS: { pattern: RegExp; currency: string }[] = [
+  { pattern: /合計[：:\s]*[¥￥]\s*([\d,]+)/i, currency: 'JPY' },
+  { pattern: /total[：:\s]*[¥￥]\s*([\d,]+)/i, currency: 'JPY' },
+  { pattern: /金額[：:\s]*[¥￥]?\s*([\d,]+)\s*円?/i, currency: 'JPY' },
+  { pattern: /料金[：:\s]*[¥￥]?\s*([\d,]+)\s*円?/i, currency: 'JPY' },
+  { pattern: /価格[：:\s]*[¥￥]?\s*([\d,]+)\s*円?/i, currency: 'JPY' },
+  { pattern: /[¥￥]\s*([\d,]+)\s*(?:\(税込\)|\(税別\)|円|JPY)?/i, currency: 'JPY' },
+  { pattern: /([\d,]+)\s*円\s*(?:\(税込\)|\(税別\))?/i, currency: 'JPY' },
+  { pattern: /JPY\s*([\d,]+)/i, currency: 'JPY' },
+  { pattern: /([\d,]+)\s*JPY/i, currency: 'JPY' },
+  { pattern: /total[：:\s]*(?:US)?\$\s*([\d.]+)/i, currency: 'USD' },
+  { pattern: /amount[：:\s]*(?:US)?\$\s*([\d.]+)/i, currency: 'USD' },
+  { pattern: /US\$\s*([\d.]+)/i, currency: 'USD' },
+  { pattern: /\$\s*([\d.]+)\s*USD/i, currency: 'USD' },
+  { pattern: /\$\s*([\d.]+)/i, currency: 'USD' },
+  { pattern: /USD\s*([\d.]+)/i, currency: 'USD' },
+  { pattern: /([\d.]+)\s*USD/i, currency: 'USD' },
   { pattern: /€\s*([\d.,]+)/, currency: 'EUR' },
   { pattern: /EUR\s*([\d.,]+)/, currency: 'EUR' },
 ];
@@ -141,110 +201,214 @@ const BILLING_CYCLE_PATTERNS: { pattern: RegExp; cycle: BillingCycle }[] = [
   { pattern: /四半期|quarterly|3\s*month/i, cycle: 'quarterly' },
 ];
 
+// HTMLからテキストを抽出
+function stripHtml(html: string): string {
+  if (!html) return '';
+  return html
+    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
+    .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&yen;/g, '¥')
+    .replace(/&#165;/g, '¥')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+// 請求メールかどうかを判定（厳格版）
+function isBillingEmail(subject: string, body: string): boolean {
+  // プロモーションメールは除外
+  if (PROMO_PATTERNS.some(pattern => pattern.test(subject))) {
+    return false;
+  }
+
+  // 件名に請求関連キーワードがあるかチェック
+  return BILLING_SUBJECT_KEYWORDS.some(pattern => pattern.test(subject));
+}
+
+// 金額を抽出
 function extractPrice(text: string): { price: number; currency: string } | null {
-  for (const { pattern, currency } of PRICE_PATTERNS) {
-    const match = text.match(pattern);
-    if (match) {
-      const priceStr = match[1].replace(/,/g, '');
-      const price = parseFloat(priceStr);
-      if (!isNaN(price) && price > 0 && price < 1000000) {
-        return { price, currency };
+  const MIN_JPY = 50, MAX_JPY = 500000;
+  const MIN_USD = 0.5, MAX_USD = 500;
+
+  // JPYパターンを必ず先にチェック（iCloudユーザーは日本が多い）
+  const jpyPatterns = PRICE_PATTERNS.filter(p => p.currency === 'JPY');
+  const otherPatterns = PRICE_PATTERNS.filter(p => p.currency !== 'JPY');
+  const orderedPatterns = [...jpyPatterns, ...otherPatterns];
+
+  for (const { pattern, currency } of orderedPatterns) {
+    const matches = text.match(new RegExp(pattern.source, 'gi'));
+    if (matches) {
+      for (const matchStr of matches) {
+        const match = matchStr.match(pattern);
+        if (match) {
+          const price = parseFloat(match[1].replace(/,/g, ''));
+
+          if (currency === 'JPY' && price >= MIN_JPY && price <= MAX_JPY) return { price, currency };
+
+          // USDの場合、$100超で¥として妥当な範囲なら¥に変換
+          // （例: $1680 → ¥1680）
+          if (currency === 'USD' && price > 100 && price >= MIN_JPY && price <= MAX_JPY) {
+            return { price, currency: 'JPY' };
+          }
+
+          if (currency === 'USD' && price >= MIN_USD && price <= MAX_USD) return { price, currency };
+          if (currency === 'EUR' && price >= MIN_USD && price <= MAX_USD) return { price, currency };
+        }
       }
     }
   }
   return null;
 }
 
+// 課金サイクルを抽出
 function extractBillingCycle(text: string): BillingCycle | null {
   for (const { pattern, cycle } of BILLING_CYCLE_PATTERNS) {
-    if (pattern.test(text)) {
-      return cycle;
-    }
+    if (pattern.test(text)) return cycle;
   }
   return null;
 }
 
-// Apple領収書かどうかを判定
-function isAppleReceipt(from: string, subject: string): boolean {
-  const isFromApple = /no_reply@email\.apple\.com/i.test(from);
-  const isReceipt = /領収書|receipt/i.test(subject);
-  return isFromApple && isReceipt;
+// Apple領収書から課金情報を抽出（サブスクリプション + アプリ内課金）
+interface ApplePurchase {
+  name: string;          // アプリ名
+  item: string | null;   // アイテム名（アプリ内課金の場合）
+  category: Category;
+  price: number | null;
+  currency: string;
+  purchaseType: 'subscription' | 'in_app_purchase' | 'purchase';
+  billingCycle?: BillingCycle;
+  nextBillingDate?: string | null;
 }
 
-// Apple領収書から複数のアプリ課金を抽出
-interface AppleAppPurchase {
-  appName: string;
-  itemName: string;
-  price: number;
-  isSubscription: boolean;
-}
+function extractApplePurchases(subject: string, body: string): ApplePurchase[] {
+  const purchases: ApplePurchase[] = [];
 
-function parseAppleReceipt(body: string): AppleAppPurchase[] {
-  const purchases: AppleAppPurchase[] = [];
+  // 1. 有効期限通知: 「サービス名（期間）¥金額／月」
+  const expirationPattern = /([A-Za-z][A-Za-z0-9\s\-]+?)(?:（|[\(])(\d+か?[月年週])(?:）|[\)])\s*[¥￥]\s*([\d,]+)[／\/]([月年週])/g;
+  let match;
+  while ((match = expirationPattern.exec(body)) !== null) {
+    const serviceName = match[1].trim();
+    const period = match[2];
+    const price = parseInt(match[3].replace(/,/g, ''), 10);
+    const cycleChar = match[4];
 
-  // HTMLタグを除去してテキスト化
-  const text = body
-    .replace(/<[^>]+>/g, '\n')
-    .replace(/&nbsp;/g, ' ')
-    .replace(/&#165;/g, '¥')
-    .replace(/&yen;/g, '¥')
-    .replace(/\r\n/g, '\n')
-    .replace(/\r/g, '\n');
+    let billingCycle: BillingCycle = 'monthly';
+    if (cycleChar === '年' || /年/.test(period)) billingCycle = 'yearly';
+    if (cycleChar === '週' || /週/.test(period)) billingCycle = 'weekly';
 
-  const lines = text.split('\n').map(l => l.trim()).filter(l => l);
+    // 有効期限日を抽出
+    const dateMatch = body.substring(match.index).match(/有効期限[はが]?\s*(\d{1,2})月(\d{1,2})日/);
+    let nextBillingDate: string | null = null;
+    if (dateMatch) {
+      const now = new Date();
+      const year = now.getFullYear();
+      const month = parseInt(dateMatch[1], 10);
+      nextBillingDate = `${year}-${month.toString().padStart(2, '0')}-${dateMatch[2].padStart(2, '0')}`;
+    }
 
-  console.log(`[parseAppleReceipt] Processing ${lines.length} lines`);
+    purchases.push({
+      name: serviceName,
+      item: null,
+      category: 'streaming',
+      price,
+      currency: 'JPY',
+      purchaseType: 'subscription',
+      billingCycle,
+      nextBillingDate,
+    });
+  }
 
-  let currentApp = '';
-  let currentItem = '';
+  // 2. Apple領収書フォーマットを解析
+  // フォーマット:
+  // アプリ名                                                                      ¥金額
+  // アイテム名
+  // アプリ内課金 または 更新：YYYY年M月D日
+  // アカウント名
+
+  const lines = body.split(/[\n\r]+/).map(l => l.trim()).filter(l => l.length > 0);
+
+  // アプリ名 + 金額の行を探す（金額が行末にある）
+  const appPricePattern = /^(.+?)\s{2,}[¥￥]\s*([\d,]+)$/;
+
+  // 無視するアプリ名パターン
+  const ignoreAppPatterns = [
+    /^App\s*Store$/i,
+    /合計[:：]?$/,
+    /^小計[:：]?$/,
+    /APPLE\s*ID/i,
+    /^請求先$/,
+    /^日付[:：]/,
+    /^ご注文番号/,
+    /^書類番号/,
+    /^PayPay/i,
+    /クレジット合計/,
+    /^-+$/,  // ダッシュのみの行
+  ];
+
+  const isIgnoredApp = (appName: string) => ignoreAppPatterns.some(p => p.test(appName));
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
+    const priceMatch = line.match(appPricePattern);
 
-    // 金額行を検出 (¥XXX または 「問題を報告する ¥XXX」形式)
-    let priceMatch = line.match(/[¥￥]\s*([\d,]+)/);
+    if (priceMatch && !isIgnoredApp(priceMatch[1].trim())) {
+      const appName = priceMatch[1].trim();
+      const price = parseInt(priceMatch[2].replace(/,/g, ''), 10);
 
-    if (priceMatch && currentApp) {
-      const price = parseInt(priceMatch[1].replace(/,/g, ''), 10);
+      // 次の行でアイテム名を取得
+      let itemName: string | null = null;
+      let purchaseType: 'subscription' | 'in_app_purchase' | 'purchase' = 'purchase';
+      let billingCycle: BillingCycle | undefined;
 
-      // 税金行や小計行は除外
-      if (/JCT|税|小計|合計|を含む/i.test(line)) {
-        continue;
+      if (i + 1 < lines.length) {
+        const nextLine = lines[i + 1];
+        // 次の行が金額でない場合はアイテム名
+        if (!nextLine.match(/^[¥￥]/) && !nextLine.match(appPricePattern)) {
+          itemName = nextLine;
+        }
       }
 
-      if (price > 0 && price < 50000) { // 妥当な範囲（50000円未満）
-        const contextText = `${currentApp} ${currentItem}`;
-        const isSubscription = /月額|年額|Pass|Premium|Plus|Pro|subscription|monthly|yearly/i.test(contextText);
+      // アプリ内課金かサブスクかを判定
+      for (let j = i + 1; j < Math.min(lines.length, i + 4); j++) {
+        if (lines[j] === 'アプリ内課金' || lines[j] === 'App 内課金') {
+          purchaseType = 'in_app_purchase';
+          break;
+        }
+        if (lines[j].includes('更新：') || lines[j].includes('(月額)') || lines[j].includes('（月額）')) {
+          purchaseType = 'subscription';
+          billingCycle = 'monthly';
+          break;
+        }
+        if (lines[j].includes('(年額)') || lines[j].includes('（年額）')) {
+          purchaseType = 'subscription';
+          billingCycle = 'yearly';
+          break;
+        }
+      }
 
-        console.log(`[parseAppleReceipt] Found: ${currentApp} - ¥${price}`);
+      // 金額が50円以上の場合のみ追加
+      if (price >= 50) {
+        // カテゴリを推測
+        let category: Category = 'gaming';
+        if (/YouTube|Netflix|Disney|Hulu|Prime/i.test(appName)) category = 'streaming';
+        if (/Spotify|Music|AWA/i.test(appName)) category = 'music';
+        if (/iCloud|Dropbox|Google/i.test(appName)) category = 'cloud';
+        if (/Twitter|X\s/i.test(appName)) category = 'other';
+        if (/Tinder|マッチング/i.test(appName)) category = 'other';
 
         purchases.push({
-          appName: currentApp,
-          itemName: currentItem,
+          name: appName,
+          item: itemName,
+          category,
           price,
-          isSubscription,
+          currency: 'JPY',
+          purchaseType,
+          billingCycle,
         });
-
-        currentApp = '';
-        currentItem = '';
-      }
-      continue;
-    }
-
-    // 除外パターン
-    if (/^(日付|ご注文番号|書類番号|請求先|更新|APPLE|Amex|Visa|JCB|Mastercard|\d{4}年|@|JPN|問題を報告)/i.test(line)) {
-      continue;
-    }
-
-    // アプリ名/アイテム名の候補
-    if (line.length > 1 && line.length < 100) {
-      // アイテム名っぽい行（大文字英語や「月額」「アプリ内課金」を含む）
-      if (/[A-Z]{2,}|月額|年額|アプリ内課金|Pass|Premium|Plus|Pro|Upgrade/i.test(line)) {
-        currentItem = line;
-      } else if (!currentApp || currentItem) {
-        // 新しいアプリ名
-        currentApp = line;
-        currentItem = '';
       }
     }
   }
@@ -252,96 +416,610 @@ function parseAppleReceipt(body: string): AppleAppPurchase[] {
   return purchases;
 }
 
-function parseEmailForSubscription(
-  subject: string,
-  from: string,
-  body: string,
-  date: Date,
-): DetectedSubscription | null {
-  const fullText = `${subject} ${from} ${body}`;
+// サービスマッチング
+interface MatchResult {
+  service: ServicePattern;
+  senderMatch: boolean;
+  contentMatch: boolean;
+  isAppStorePurchase?: boolean;
+  purchaseType?: 'subscription' | 'in_app_purchase' | 'purchase';
+  itemName?: string | null;
+  extractedPrice?: number | null;
+  extractedCurrency?: string;
+  extractedBillingCycle?: BillingCycle;
+  extractedNextBillingDate?: string | null;
+}
 
-  for (const service of SERVICE_PATTERNS) {
-    if (service.pattern.test(fullText)) {
-      const priceInfo = extractPrice(fullText);
-      const billingCycle = extractBillingCycle(fullText);
+function matchService(fromAddress: string, subject: string, body: string): MatchResult[] | null {
+  const fromLower = fromAddress.toLowerCase();
+  const fullText = `${subject} ${body}`;
 
-      let confidence = 0.5;
-      if (priceInfo) confidence += 0.2;
-      if (billingCycle) confidence += 0.15;
-      if (/receipt|invoice|領収|請求|支払/i.test(subject)) confidence += 0.15;
+  // ★ Apple領収書を最優先で処理（個別のアプリ課金を抽出するため）
+  const isAppleEmail = /@(apple\.com|itunes\.com|email\.apple\.com)/i.test(fromLower) || /no_reply@.*apple/i.test(fromLower);
+  const isAppleReceipt = /領収書|receipt/i.test(subject);
 
-      return {
-        name: service.name,
-        category: service.category,
-        price: priceInfo?.price || null,
-        currency: priceInfo?.currency || 'JPY',
-        billingCycle,
-        email: from,
-        detectedDate: date.toISOString(),
-        confidence,
-      };
+  if (isAppleEmail && isAppleReceipt) {
+    const purchases = extractApplePurchases(subject, fullText);
+
+    if (purchases.length > 0) {
+      console.log(`[APPLE] Found ${purchases.length} purchase(s) from receipt`);
+      return purchases.map(purchase => {
+        // アイテム名がある場合は「アプリ名 - アイテム名」形式で表示名を作成
+        const displayName = purchase.item
+          ? `${purchase.name} - ${purchase.item}`
+          : purchase.name;
+
+        return {
+          service: {
+            pattern: new RegExp(purchase.name, 'i'),
+            name: displayName,
+            category: purchase.category,
+            senderPatterns: [],
+            subjectPatterns: []
+          },
+          senderMatch: true,
+          contentMatch: true,
+          isAppStorePurchase: true,
+          purchaseType: purchase.purchaseType,
+          itemName: purchase.item,
+          extractedPrice: purchase.price,
+          extractedCurrency: purchase.currency,
+          extractedBillingCycle: purchase.billingCycle,
+          extractedNextBillingDate: purchase.nextBillingDate,
+        };
+      });
     }
   }
+
+  // Appleの有効期限通知・サブスクリプション確認
+  if (isAppleEmail && /有効期限|サブスクリプション/i.test(subject)) {
+    const purchases = extractApplePurchases(subject, fullText);
+    if (purchases.length > 0) {
+      console.log(`[APPLE] Found ${purchases.length} subscription(s) from notification`);
+      return purchases.map(purchase => ({
+        service: {
+          pattern: new RegExp(purchase.name, 'i'),
+          name: purchase.name,
+          category: purchase.category,
+          senderPatterns: [],
+          subjectPatterns: []
+        },
+        senderMatch: true,
+        contentMatch: true,
+        isAppStorePurchase: true,
+        purchaseType: purchase.purchaseType,
+        itemName: purchase.item,
+        extractedPrice: purchase.price,
+        extractedCurrency: purchase.currency,
+        extractedBillingCycle: purchase.billingCycle,
+        extractedNextBillingDate: purchase.nextBillingDate,
+      }));
+    }
+  }
+
+  // 定義済みサービスをチェック（Apple以外）
+  // ★ 送信者パターンがマッチした場合のみ検出（誤検出防止）
+  for (const service of SERVICE_PATTERNS) {
+    if (service.senderPatterns && service.subjectPatterns) {
+      // Appleメールはスキップ（上で処理済み）
+      if (isAppleEmail) continue;
+
+      const senderMatch = service.senderPatterns.some(p => p.test(fromLower));
+      if (!senderMatch) continue; // 送信者がマッチしない場合はスキップ
+
+      const contentMatch = service.subjectPatterns.some(p => p.test(fullText));
+      if (contentMatch || isBillingEmail(subject, fullText)) {
+        return [{ service, senderMatch, contentMatch }];
+      }
+    }
+  }
+
+  // ★ 一般的なパターンマッチングは無効化（誤検出が多いため）
+  // 送信者パターンがない場合は検出しない
 
   return null;
 }
 
-// 1つのメールから複数の課金を抽出
-function parseEmailForSubscriptions(
-  subject: string,
-  from: string,
-  body: string,
-  date: Date,
-): DetectedSubscription[] {
-  const results: DetectedSubscription[] = [];
+// OpenAI APIで金額を抽出
+async function extractPriceWithAI(emailContent: string, serviceName: string): Promise<{ price: number; currency: string; billingCycle: BillingCycle | null } | null> {
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) {
+    console.log(`[AI] No API key for ${serviceName}`);
+    return null;
+  }
 
-  // Apple領収書の場合は専用パーサーを使用
-  if (isAppleReceipt(from, subject)) {
-    console.log(`[iCloud] Apple receipt detected: ${subject}`);
-    const purchases = parseAppleReceipt(body);
+  console.log(`[AI] Extracting price for ${serviceName}, content length: ${emailContent.length}`);
 
-    for (const purchase of purchases) {
-      // アプリ名で既知のサービスを検索
-      let category: Category = 'other';
-      let serviceName = purchase.appName;
+  try {
+    const response = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model: 'gpt-4o-mini',
+        messages: [
+          {
+            role: 'system',
+            content: `You are an expert at extracting subscription payment information from emails.
+Your task is to find the subscription price for "${serviceName}".
 
-      for (const service of SERVICE_PATTERNS) {
-        if (service.pattern.test(purchase.appName) || service.pattern.test(purchase.itemName)) {
-          serviceName = service.name;
-          category = service.category;
-          break;
+Respond ONLY with a JSON object (no markdown, no explanation):
+{
+  "price": <number or null>,
+  "currency": "<JPY or USD or null>",
+  "billingCycle": "<monthly or yearly or weekly or null>"
+}
+
+IMPORTANT Rules:
+- price should be a number without currency symbols or commas (e.g., 1280 not ¥1,280)
+- Look for ANY price mentioned that could be a subscription fee
+- Common subscription prices:
+  - YouTube Premium: around ¥1,280/month or $13.99/month
+  - iCloud+: ¥130-¥1,300/month or $0.99-$9.99/month
+  - Slack: varies by plan
+  - Claude Pro: $20/month
+  - Notion: $8-$10/month or ¥1,000-¥1,500/month
+- For Japanese emails: look for 円, ¥, ￥, JPY, 税込, 合計, 請求
+- For English emails: look for $, USD, total, amount, charged
+- If multiple prices found, prefer the one that looks like a subscription total
+- Even if the email doesn't explicitly say "subscription", extract any price found`
+          },
+          {
+            role: 'user',
+            content: `Extract the subscription price for "${serviceName}" from this email content:\n\n${emailContent.substring(0, 4000)}`
+          }
+        ],
+        temperature: 0,
+        max_tokens: 150,
+      }),
+    });
+
+    const data = await response.json() as { choices?: { message?: { content?: string } }[]; error?: unknown };
+    console.log(`[AI] Response for ${serviceName}:`, JSON.stringify(data.choices?.[0]?.message?.content || data.error));
+
+    if (data.choices && data.choices[0]?.message?.content) {
+      const content = data.choices[0].message.content.trim();
+      const jsonStr = content.replace(/```json\n?|\n?```/g, '').trim();
+      const result = JSON.parse(jsonStr);
+      console.log(`[AI] Parsed result for ${serviceName}:`, result);
+      if (result.price !== null && result.price > 0) {
+        return {
+          price: result.price,
+          currency: result.currency || 'JPY',
+          billingCycle: result.billingCycle || null,
+        };
+      }
+    }
+  } catch (error: any) {
+    console.error(`[AI] Error for ${serviceName}:`, error.message);
+  }
+  return null;
+}
+
+// サブスク関連の送信者アドレス（IMAP検索用）
+const SUBSCRIPTION_SENDERS = [
+  // Apple
+  'no_reply@email.apple.com',
+  'noreply@email.apple.com',
+  'appleid@id.apple.com',
+  'noreply@apple.com',
+  // Google / YouTube
+  'noreply@youtube.com',
+  'googleplay-noreply@google.com',
+  'payments-noreply@google.com',
+  // Amazon
+  'auto-confirm@amazon.co.jp',
+  'auto-confirm@amazon.com',
+  'digital-no-reply@amazon.co.jp',
+  'digital-no-reply@amazon.com',
+  'store-news@amazon.co.jp',
+  // Netflix
+  'info@mailer.netflix.com',
+  'info@account.netflix.com',
+  // Spotify
+  'no-reply@spotify.com',
+  // Disney+
+  'disneyplus@mail.disneyplus.com',
+  // Adobe
+  'mail@mail.adobe.com',
+  'adobeid@adobesystems.com',
+  // Microsoft
+  'microsoft@email.microsoft.com',
+  'msa@communication.microsoft.com',
+  // Notion
+  'notify@mail.notion.so',
+  // Slack
+  'feedback@slack.com',
+  // GitHub
+  'noreply@github.com',
+  // OpenAI / ChatGPT
+  'noreply@openai.com',
+  'noreply@tm.openai.com',
+  // Anthropic / Claude
+  'noreply@anthropic.com',
+  // Dropbox
+  'no-reply@dropbox.com',
+  // PlayStation
+  'reply@txn-email.playstation.com',
+  'Sony@email.sonyentertainmentnetwork.com',
+  // Nintendo
+  'no-reply@accounts.nintendo.com',
+  // Hulu
+  'huluinfo@hulumail.jp',
+  // U-NEXT
+  'unext-info@unext-info.jp',
+  // Zoom
+  'no-reply@zoom.us',
+];
+
+// 送信者ドメイン（部分一致検索用）
+const SUBSCRIPTION_DOMAINS = [
+  'apple.com',
+  'itunes.com',
+  'netflix.com',
+  'spotify.com',
+  'amazon.co.jp',
+  'amazon.com',
+  'google.com',
+  'youtube.com',
+  'microsoft.com',
+  'adobe.com',
+  'notion.so',
+  'slack.com',
+  'github.com',
+  'openai.com',
+  'anthropic.com',
+  'dropbox.com',
+  'playstation.com',
+  'nintendo.com',
+  'zoom.us',
+  'hulu.jp',
+  'disneyplus.com',
+];
+
+// メイン処理
+async function fetchEmails(email: string, appPassword: string, _maxResults: number = 500): Promise<{
+  success: boolean;
+  subscriptions: DetectedSubscription[];
+  totalFound: number;
+  scannedEmails: number;
+  debug?: { servicesNeedingAI: string[]; aiExtractionResults: unknown[] };
+}> {
+  const client = new ImapFlow({
+    host: 'imap.mail.me.com',
+    port: 993,
+    secure: true,
+    auth: { user: email, pass: appPassword },
+    logger: false,
+  });
+
+  await client.connect();
+
+  const detected = new Map<string, Omit<DetectedSubscription, 'paymentHistory' | 'totalPaid' | 'paymentCount'>>();
+  const paymentHistories = new Map<string, PaymentRecord[]>();
+  const emailContents = new Map<string, { content: string; isBilling: boolean }>();
+  let totalScanned = 0;
+
+  // INBOXのみスキャン（高速化）
+  const foldersToScan = ['INBOX'];
+
+  for (const folderName of foldersToScan) {
+    let lock;
+    try {
+      lock = await client.getMailboxLock(folderName);
+    } catch (e) {
+      console.log(`Folder "${folderName}" not found, skipping`);
+      continue;
+    }
+
+    try {
+      const mailbox = client.mailbox;
+      if (!mailbox || mailbox.exists === 0) {
+        lock.release();
+        continue;
+      }
+
+      console.log(`\n[SCAN] Folder: ${folderName} (${mailbox.exists} emails)`);
+
+      // 高速化: 重要な送信者のみに絞って検索
+      const matchingUids = new Set<number>();
+
+      // 優先度の高い送信者（Apple, Netflix, Spotify等の主要サービス）
+      const prioritySenders = [
+        'no_reply@email.apple.com',  // Apple領収書
+        'appleid@id.apple.com',
+        'info@mailer.netflix.com',
+        'no-reply@spotify.com',
+        'noreply@youtube.com',
+        'payments-noreply@google.com',
+      ];
+
+      for (const sender of prioritySenders) {
+        try {
+          const result = await client.search({ from: sender }, { uid: true });
+          if (result && Array.isArray(result) && result.length > 0) {
+            result.forEach(uid => matchingUids.add(uid));
+            console.log(`  [SEARCH] ${sender}: ${result.length} emails`);
+          }
+        } catch (e) {
+          // 検索エラーは無視
         }
       }
 
-      const billingCycle = purchase.isSubscription ? 'monthly' as BillingCycle : null;
+      // 件名で領収書を検索（高速）
+      try {
+        const result = await client.search({ subject: '領収書' }, { uid: true });
+        if (result && Array.isArray(result) && result.length > 0) {
+          result.forEach(uid => matchingUids.add(uid));
+          console.log(`  [SEARCH] Subject "領収書": ${result.length} emails`);
+        }
+      } catch (e) {}
 
-      results.push({
-        name: serviceName,
-        category,
-        price: purchase.price,
-        currency: 'JPY',
-        billingCycle,
-        email: from,
-        detectedDate: date.toISOString(),
-        confidence: 0.85,
+      console.log(`  [TOTAL] ${matchingUids.size} unique emails to process in ${folderName}`);
+
+      if (matchingUids.size === 0) {
+        lock.release();
+        continue;
+      }
+
+      // マッチしたメールを処理
+      const uidArray = Array.from(matchingUids);
+      const uidRanges = uidArray.join(',');
+
+      for await (const msg of client.fetch(uidRanges, { source: true }, { uid: true })) {
+        if (!msg.source) continue;
+        totalScanned++;
+
+        const parsed: ParsedMail = await simpleParser(msg.source);
+        const subject = parsed.subject || '';
+        const fromAddress = parsed.from?.value?.[0]?.address || '';
+        const fromText = parsed.from?.text || '';
+        const body = parsed.text || '';
+        const htmlBody = parsed.html || '';
+        const fullText = `${subject} ${body} ${htmlBody}`;
+        const emailDate = parsed.date || new Date();
+
+        const matchResults = matchService(fromAddress, subject, fullText);
+        if (!matchResults) continue;
+
+        const isBilling = isBillingEmail(subject, fullText);
+        const htmlText = stripHtml(htmlBody);
+        const currentContent = `Subject: ${subject}\nFrom: ${fromText}\n\n--- Plain Text ---\n${body}\n\n--- HTML Content ---\n${htmlText}`;
+
+        for (const matchResult of matchResults) {
+          const { service, senderMatch, contentMatch, purchaseType, itemName, extractedPrice, extractedCurrency, extractedBillingCycle, extractedNextBillingDate } = matchResult;
+
+          let priceInfo = extractedPrice != null ? { price: extractedPrice, currency: extractedCurrency || 'JPY' } : extractPrice(fullText);
+          let billingCycle = extractedBillingCycle || extractBillingCycle(fullText);
+
+          console.log(`[DETECTED] ${service.name}`);
+          console.log(`  From: ${fromAddress}`);
+          console.log(`  Subject: ${subject.substring(0, 80)}`);
+          console.log(`  Date: ${emailDate.toISOString()}`);
+          console.log(`  Is Billing Email: ${isBilling}`);
+          if (purchaseType) {
+            console.log(`  Purchase Type: ${purchaseType}`);
+          }
+          if (itemName) {
+            console.log(`  Item: ${itemName}`);
+          }
+          if (priceInfo) {
+            console.log(`  ✓ Price Found: ${priceInfo.price} ${priceInfo.currency} (${extractedPrice != null ? 'Apple Receipt' : 'Pattern Matching'})`);
+          }
+          if (billingCycle) {
+            console.log(`  ✓ Billing Cycle: ${billingCycle}`);
+          }
+          if (extractedNextBillingDate) {
+            console.log(`  ✓ Next Billing: ${extractedNextBillingDate}`);
+          }
+
+          let confidence = 0.2;
+          if (senderMatch) confidence += 0.2;
+          if (contentMatch) confidence += 0.1;
+          if (isBilling) confidence += 0.3;
+          if (priceInfo) confidence += 0.15;
+          if (billingCycle) confidence += 0.05;
+
+          // 請求メールで金額が見つかった場合は支払い履歴に追加
+          if (isBilling && priceInfo) {
+            if (!paymentHistories.has(service.name)) paymentHistories.set(service.name, []);
+            paymentHistories.get(service.name)!.push({
+              date: emailDate.toISOString(),
+              price: priceInfo.price,
+              currency: priceInfo.currency,
+              subject: subject.substring(0, 100),
+            });
+            console.log(`[PAYMENT] Added to history: ${service.name} - ${priceInfo.price} ${priceInfo.currency} on ${emailDate.toISOString().split('T')[0]}`);
+          }
+
+          // メール内容を保存（AI抽出用）
+          const existingContent = emailContents.get(service.name);
+          if (!existingContent ||
+              (isBilling && !existingContent.isBilling) ||
+              (isBilling === existingContent.isBilling && currentContent.length > existingContent.content.length)) {
+            emailContents.set(service.name, { content: currentContent, isBilling });
+          }
+
+          // サブスク情報を更新
+          const existing = detected.get(service.name);
+          const shouldUpdate = !existing ||
+            (isBilling && !existing.isBilling) ||
+            (isBilling === existing.isBilling && confidence > existing.confidence);
+
+          if (shouldUpdate) {
+            detected.set(service.name, {
+              name: service.name,
+              category: service.category,
+              price: (isBilling && priceInfo) ? priceInfo.price : (existing?.price ?? null),
+              currency: (isBilling && priceInfo) ? priceInfo.currency : (existing?.currency ?? 'JPY'),
+              billingCycle: billingCycle ?? existing?.billingCycle ?? null,
+              nextBillingDate: extractedNextBillingDate ?? existing?.nextBillingDate ?? null,
+              email: fromText,
+              detectedDate: emailDate.toISOString(),
+              confidence,
+              priceDetected: !!(isBilling && priceInfo),
+              isBilling,
+            });
+          }
+        }
+      }
+    } finally {
+      lock.release();
+    }
+  }
+
+  await client.logout();
+
+  // AI抽出は無効化（高速化のため）
+  const aiExtractionResults: unknown[] = [];
+  const servicesNeedingAI: string[] = [];
+  console.log('\n=== AI Extraction Disabled for Speed ===\n');
+
+  // 同じアプリの課金を統合
+  const getBaseName = (name: string) => {
+    let base = name.split(' - ')[0].trim();
+
+    // 正規化: 似た名前を統一
+    if (/^Tinder/i.test(base)) return 'Tinder';
+    if (/^YouTube/i.test(base)) return 'YouTube';
+    if (/^LINE\b/i.test(base)) return 'LINE';
+    if (/^Spotify/i.test(base)) return 'Spotify';
+    if (/クラッシュ・オブ・クラン|Clash of Clans/i.test(base)) return 'クラッシュ・オブ・クラン';
+    if (/クラッシュ・ロワイヤル|Clash Royale/i.test(base)) return 'クラッシュ・ロワイヤル';
+
+    return base;
+  };
+
+  // アプリ名ごとにグループ化
+  const appGroups = new Map<string, {
+    items: Map<string, SubItemPurchase[]>;  // アイテム名 -> 購入履歴
+    category: Category;
+    currency: string;
+    billingCycle: BillingCycle | null;
+    email: string;
+    latestDate: string;
+    paymentHistory: PaymentRecord[];
+  }>();
+
+  for (const [name, sub] of detected.entries()) {
+    const baseName = getBaseName(name);
+    const itemName = name.includes(' - ') ? name.split(' - ').slice(1).join(' - ') : null;
+    const history = paymentHistories.get(name) || [];
+
+    if (!appGroups.has(baseName)) {
+      appGroups.set(baseName, {
+        items: new Map(),
+        category: sub.category,
+        currency: sub.currency,
+        billingCycle: sub.billingCycle,
+        email: sub.email,
+        latestDate: sub.detectedDate,
+        paymentHistory: [],
       });
     }
 
-    if (results.length > 0) {
-      return results;
+    const group = appGroups.get(baseName)!;
+
+    // アイテム別の購入履歴を追加
+    if (itemName && history.length > 0) {
+      if (!group.items.has(itemName)) {
+        group.items.set(itemName, []);
+      }
+      const itemPurchases = group.items.get(itemName)!;
+      for (const h of history) {
+        itemPurchases.push({
+          date: h.date,
+          price: h.price,
+        });
+      }
+    }
+
+    group.paymentHistory.push(...history);
+    if (sub.detectedDate > group.latestDate) {
+      group.latestDate = sub.detectedDate;
     }
   }
 
-  // 通常のパース
-  const single = parseEmailForSubscription(subject, from, body, date);
-  if (single) {
-    results.push(single);
+  // 統合結果を作成
+  const results: DetectedSubscription[] = [];
+  for (const [baseName, group] of appGroups.entries()) {
+    // 支払い履歴を日付順にソート
+    group.paymentHistory.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+    const totalPaid = group.paymentHistory.reduce((sum, h) => sum + h.price, 0);
+
+    // サブアイテムを構築（購入日の新しい順にソート）
+    const subItems: SubItem[] = Array.from(group.items.entries())
+      .map(([name, purchases]) => {
+        // 購入履歴を日付の新しい順にソート
+        const sortedPurchases = [...purchases].sort(
+          (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()
+        );
+        return {
+          name,
+          currency: group.currency,
+          purchases: sortedPurchases,
+          totalPaid: purchases.reduce((sum, p) => sum + p.price, 0),
+        };
+      })
+      .sort((a, b) => b.totalPaid - a.totalPaid); // 累計金額の高い順
+
+    results.push({
+      name: baseName,  // シンプルなアプリ名のみ
+      category: group.category,
+      // 最新の支払い金額を表示（履歴は古い順なので最後の要素）
+      price: group.paymentHistory.length > 0 ? group.paymentHistory[group.paymentHistory.length - 1].price : null,
+      currency: group.currency,
+      billingCycle: group.billingCycle,
+      nextBillingDate: null,
+      email: group.email,
+      detectedDate: group.latestDate,
+      confidence: 1,
+      priceDetected: totalPaid > 0,
+      isBilling: true,
+      paymentHistory: group.paymentHistory,
+      totalPaid,
+      paymentCount: group.paymentHistory.length,
+      subItems: subItems.length > 0 ? subItems : undefined,
+    });
   }
 
-  return results;
+  // アプリ名でソート
+  results.sort((a, b) => {
+    const baseA = a.name.split(' (')[0].trim();
+    const baseB = b.name.split(' (')[0].trim();
+    return baseA.localeCompare(baseB, 'ja');
+  });
+
+  // 最終結果のサマリーログ
+  console.log('\n=== Final Results Summary ===');
+  results.forEach(sub => {
+    const priceStr = sub.price !== null ? `${sub.price} ${sub.currency}` : '金額不明';
+    const source = sub.extractedByAI ? 'AI' : (sub.priceDetected ? 'Pattern' : 'N/A');
+    const historyCount = sub.paymentHistory?.length || 0;
+    console.log(`${sub.name}: ${priceStr} [Source: ${source}] [History: ${historyCount}件]`);
+  });
+  console.log('=============================\n');
+
+  return {
+    success: true,
+    subscriptions: results,
+    totalFound: results.length,
+    scannedEmails: totalScanned,
+    debug: {
+      servicesNeedingAI,
+      aiExtractionResults,
+    }
+  };
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
+  if (req.method === 'OPTIONS') {
+    res.status(204).end();
+    return;
+  }
+
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
@@ -351,134 +1029,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(400).json({
       success: false,
       error: 'Invalid request body',
-      details: parseResult.error.errors,
+      details: parseResult.error.issues,
     });
   }
 
   const { email, appPassword, maxResults } = parseResult.data;
 
-  const client = new ImapFlow({
-    host: 'imap.mail.me.com',
-    port: 993,
-    secure: true,
-    auth: {
-      user: email,
-      pass: appPassword,
-    },
-    logger: false,
-  });
-
   try {
-    await client.connect();
-
-    const mailbox = await client.getMailboxLock('INBOX');
-    const detected: DetectedSubscription[] = [];
-    const seenServices = new Set<string>();
-
-    try {
-      // 課金メールを送る主要な送信者で検索
-      const senderSearchQuery = {
-        or: [
-          { from: 'no_reply@email.apple.com' },      // Apple
-          { from: 'noreply@youtube.com' },           // YouTube
-          { from: 'googleplay-noreply@google.com' }, // Google Play
-          { from: 'auto-confirm@amazon' },           // Amazon
-          { from: 'digital-no-reply@amazon' },       // Amazon Digital
-        ],
-      };
-
-      // 件名での検索（バックアップ）
-      const subjectSearchQuery = {
-        or: [
-          { subject: 'receipt' },
-          { subject: 'invoice' },
-          { subject: '領収' },
-          { subject: '請求' },
-        ],
-      };
-
-      const messages: number[] = [];
-      const seenUids = new Set<number>();
-
-      // 1. まず送信者で検索（課金メールの送信者）
-      console.log('[iCloud] Searching by sender...');
-      try {
-        for await (const msg of client.fetch(senderSearchQuery, { uid: true })) {
-          if (!seenUids.has(msg.uid)) {
-            seenUids.add(msg.uid);
-            messages.push(msg.uid);
-          }
-          if (messages.length >= maxResults) break;
-        }
-      } catch (e) {
-        console.log('[iCloud] Sender search failed, trying subject search');
-      }
-
-      console.log(`[iCloud] Found ${messages.length} emails by sender`);
-
-      // 2. 件名で追加検索
-      if (messages.length < maxResults) {
-        try {
-          for await (const msg of client.fetch(subjectSearchQuery, { uid: true })) {
-            if (!seenUids.has(msg.uid)) {
-              seenUids.add(msg.uid);
-              messages.push(msg.uid);
-            }
-            if (messages.length >= maxResults) break;
-          }
-        } catch (e) {
-          console.log('[iCloud] Subject search failed');
-        }
-      }
-
-      console.log(`[iCloud] Total emails to process: ${messages.length}`);
-
-      // Fetch full message content
-      for (const uid of messages.slice(0, maxResults)) {
-        try {
-          const msg = await client.fetchOne(uid.toString(), {
-            source: true,
-          }, { uid: true });
-
-          if (msg?.source) {
-            const parsed: ParsedMail = await simpleParser(msg.source);
-
-            const subject = parsed.subject || '';
-            const from = typeof parsed.from?.text === 'string' ? parsed.from.text : '';
-            const body = parsed.text || parsed.html?.replace(/<[^>]*>/g, ' ') || '';
-            const date = parsed.date || new Date();
-
-            console.log(`[iCloud] Processing: ${subject.substring(0, 50)} from ${from.substring(0, 30)}`);
-
-            // 複数の課金を抽出（Apple領収書対応）
-            const subscriptions = parseEmailForSubscriptions(subject, from, body, date);
-
-            for (const subscription of subscriptions) {
-              if (!seenServices.has(subscription.name)) {
-                seenServices.add(subscription.name);
-                detected.push(subscription);
-                console.log(`[iCloud] Detected: ${subscription.name} - ${subscription.price} ${subscription.currency}`);
-              }
-            }
-          }
-        } catch (parseError) {
-          console.error('Error parsing message:', parseError);
-        }
-      }
-    } finally {
-      mailbox.release();
-    }
-
-    await client.logout();
-
-    // Sort by confidence
-    detected.sort((a, b) => b.confidence - a.confidence);
-
-    return res.status(200).json({
-      success: true,
-      subscriptions: detected,
-      totalFound: detected.length,
-    });
+    const result = await fetchEmails(email, appPassword, maxResults);
+    return res.status(200).json(result);
   } catch (error: any) {
     console.error('iCloud fetch error:', error);
 
@@ -491,7 +1050,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       errorMessage = 'Connection timed out.';
     }
 
-    return res.status(500).json({
+    return res.status(error.authenticationFailed ? 401 : 500).json({
       success: false,
       error: errorMessage,
     });

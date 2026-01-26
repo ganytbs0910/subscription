@@ -1,11 +1,8 @@
 import type { DetectedSubscription } from './emailParser';
 
-// APIのベースURL（環境に応じて変更）
-// ローカル開発: http://localhost:3000
-// 本番: https://your-app.vercel.app
-const API_BASE_URL = __DEV__
-  ? 'http://192.168.40.70:3000'
-  : 'https://subscription-server-chi.vercel.app';
+// APIのベースURL
+// Vercelにデプロイ済みのサーバーを使用
+const API_BASE_URL = 'https://subscription-hazel.vercel.app';
 
 export interface ICloudCredentials {
   email: string;

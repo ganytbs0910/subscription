@@ -33,6 +33,9 @@ import {
 import {
   parseMultipleEmails,
   DetectedSubscription,
+  DetectionType,
+  SubItem,
+  SubItemPurchase,
 } from '../../services/emailParser';
 import {
   testICloudConnection,
@@ -114,16 +117,23 @@ export default function ScanEmailScreen() {
       setUserEmail(user?.email || null);
 
       setStatus('fetching');
-      // 全件取得（進捗表示付き）
+      // デバッグ: まず100件で確認
       const messages = await fetchSubscriptionEmails(
         accessToken,
-        undefined, // 全件取得
-        (fetched) => setProgress({ current: fetched, total: 0 }), // 総数は不明なので0
+        100, // デバッグ用に100件に制限
+        (fetched) => setProgress({ current: fetched, total: 0 }),
       );
+
+      console.log('========================================');
+      console.log(`[SCAN] 取得したメール数: ${messages.length}件`);
+      console.log('========================================');
+
+      // デバッグ用Alert
+      Alert.alert('デバッグ', `取得したメール: ${messages.length}件`);
 
       if (messages.length === 0) {
         setStatus('done');
-        Alert.alert('結果', 'サブスク関連のメールが見つかりませんでした');
+        Alert.alert('結果', 'サブスク・課金関連のメールが見つかりませんでした');
         return;
       }
 
@@ -136,8 +146,58 @@ export default function ScanEmailScreen() {
         (current, total) => setProgress({ current, total }),
       );
 
+      // デバッグ: メールの送信者と件名をログ出力
+      console.log('\n[SCAN] メール一覧:');
+      const appleEmails: typeof emailDetails = [];
+      const otherPaymentEmails: typeof emailDetails = [];
+
+      for (const email of emailDetails) {
+        const from = email.payload?.headers?.find(h => h.name.toLowerCase() === 'from')?.value || '';
+        const subject = email.payload?.headers?.find(h => h.name.toLowerCase() === 'subject')?.value || '';
+
+        // Apple領収書かどうか
+        const isApple = /no_reply@email\.apple\.com/i.test(from);
+        const isReceipt = /領収書|receipt/i.test(subject);
+
+        if (isApple) {
+          appleEmails.push(email);
+          console.log(`  📱 [Apple] ${subject}`);
+          if (isReceipt) {
+            console.log(`      ↳ 領収書メール ✓`);
+          }
+        } else if (/payment|receipt|invoice|請求|領収|支払|購入|注文/i.test(subject)) {
+          otherPaymentEmails.push(email);
+          console.log(`  💳 [課金] ${subject} (from: ${from.substring(0, 50)})`);
+        }
+      }
+
+      console.log('\n----------------------------------------');
+      console.log(`[SCAN] Appleからのメール: ${appleEmails.length}件`);
+      console.log(`[SCAN] その他の課金メール: ${otherPaymentEmails.length}件`);
+      console.log('----------------------------------------\n');
+
+      // Apple領収書の詳細をログ出力（最初の3件）
+      if (appleEmails.length > 0) {
+        console.log('[SCAN] Apple領収書の内容サンプル:');
+        for (let i = 0; i < Math.min(3, appleEmails.length); i++) {
+          const email = appleEmails[i];
+          const subject = email.payload?.headers?.find(h => h.name.toLowerCase() === 'subject')?.value || '';
+          const body = extractEmailBodyForLog(email);
+          console.log(`\n--- Apple領収書 #${i + 1}: ${subject} ---`);
+          console.log(body.substring(0, 1500)); // 最初の1500文字
+          console.log('--- END ---\n');
+        }
+      }
+
       setStatus('parsing');
       const detected = parseMultipleEmails(emailDetails);
+
+      console.log('\n========================================');
+      console.log(`[SCAN] 検出されたサブスク/課金: ${detected.length}件`);
+      for (const d of detected) {
+        console.log(`  - ${d.name}: ${d.price ?? '金額不明'} ${d.currency || ''} (${d.type})`);
+      }
+      console.log('========================================\n');
 
       const existingNames = new Set(subscriptions.map((s) => s.name.toLowerCase()));
       const newSubscriptions = detected.filter(
@@ -149,11 +209,42 @@ export default function ScanEmailScreen() {
       setStatus('done');
 
       if (newSubscriptions.length === 0 && detected.length > 0) {
-        Alert.alert('結果', '検出されたサブスクはすべて登録済みです');
+        Alert.alert('結果', '検出されたサブスク・課金はすべて登録済みです');
       }
     } catch (error: any) {
+      console.error('[SCAN] エラー:', error);
       setStatus('error');
       setErrorMessage(error.message || 'スキャン中にエラーが発生しました');
+    }
+  };
+
+  // デバッグ用: メール本文を抽出
+  const extractEmailBodyForLog = (email: any): string => {
+    try {
+      const parts = email.payload?.parts || [email.payload];
+      let body = '';
+
+      for (const part of parts) {
+        if (part?.body?.data) {
+          const base64 = part.body.data.replace(/-/g, '+').replace(/_/g, '/');
+          body += decodeURIComponent(
+            atob(base64)
+              .split('')
+              .map(c => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2))
+              .join(''),
+          );
+        }
+      }
+
+      // HTMLタグを除去
+      return body
+        .replace(/<[^>]+>/g, '\n')
+        .replace(/&nbsp;/g, ' ')
+        .replace(/&#165;/g, '¥')
+        .replace(/\s+/g, ' ')
+        .trim();
+    } catch {
+      return '[本文の取得に失敗]';
     }
   };
 
@@ -206,9 +297,9 @@ export default function ScanEmailScreen() {
       setStatus('done');
 
       if (newSubscriptions.length === 0 && result.totalFound > 0) {
-        Alert.alert('結果', '検出されたサブスクはすべて登録済みです');
+        Alert.alert('結果', '検出されたサブスク・課金はすべて登録済みです');
       } else if (result.totalFound === 0) {
-        Alert.alert('結果', 'サブスク関連のメールが見つかりませんでした');
+        Alert.alert('結果', 'サブスク・課金関連のメールが見つかりませんでした');
       }
     } catch (error: any) {
       setStatus('error');
@@ -258,12 +349,40 @@ export default function ScanEmailScreen() {
           startDate = sortedHistory[0].date;
         }
 
-        // 支払い履歴をPaymentRecord形式に変換
-        const paymentHistory = sub.paymentHistory?.map(h => ({
-          date: h.date,
-          price: h.price,
-          currency: h.currency,
-          subject: h.subject,
+        // subItemsからアイテム名付きの支払い履歴を構築
+        const paymentHistory: { date: string; price: number; currency: string; subject?: string; itemName?: string }[] = [];
+        if (sub.subItems && sub.subItems.length > 0) {
+          // subItemsがある場合はそこから支払い履歴を構築
+          for (const item of sub.subItems) {
+            for (const purchase of item.purchases) {
+              paymentHistory.push({
+                date: purchase.date,
+                price: purchase.price,
+                currency: item.currency,
+                itemName: item.name,
+              });
+            }
+          }
+          // 日付でソート（新しい順）
+          paymentHistory.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+        } else if (sub.paymentHistory) {
+          // subItemsがない場合は従来の支払い履歴を使用
+          for (const h of sub.paymentHistory) {
+            paymentHistory.push({
+              date: h.date,
+              price: h.price,
+              currency: h.currency,
+              subject: h.subject,
+            });
+          }
+        }
+
+        // subItemsをSubItem形式に変換
+        const subItems = sub.subItems?.map(item => ({
+          name: item.name,
+          currency: item.currency,
+          purchases: item.purchases.map(p => ({ date: p.date, price: p.price })),
+          totalPaid: item.totalPaid,
         }));
 
         const subscriptionData = {
@@ -277,6 +396,7 @@ export default function ScanEmailScreen() {
           isActive: true,
           paymentHistory,
           totalPaidFromEmail: sub.totalPaid,
+          subItems,
         };
 
         addSubscription(subscriptionData);
@@ -284,7 +404,7 @@ export default function ScanEmailScreen() {
 
       Alert.alert(
         '追加完了',
-        `${selected.length}件のサブスクを追加しました`,
+        `${selected.length}件を追加しました`,
         [{ text: 'OK', onPress: () => navigation.goBack() }],
       );
     } catch (error: any) {
@@ -305,6 +425,20 @@ export default function ScanEmailScreen() {
       default:
         return '不明';
     }
+  };
+
+  const getTypeLabel = (type: DetectionType): string => {
+    return type === 'subscription' ? 'サブスク' : '課金';
+  };
+
+  const getTypeColor = (type: DetectionType): string => {
+    return type === 'subscription' ? theme.colors.primary : '#FF9500';
+  };
+
+  // 日付を「M/D」形式にフォーマット
+  const formatShortDate = (dateString: string): string => {
+    const date = new Date(dateString);
+    return `${date.getMonth() + 1}/${date.getDate()}`;
   };
 
   const openAppPasswordHelp = () => {
@@ -436,7 +570,7 @@ export default function ScanEmailScreen() {
         return (
           <View style={styles.statusContainer}>
             <ActivityIndicator size="large" color={theme.colors.primary} />
-            <Text style={styles.statusText}>サブスクを検出中...</Text>
+            <Text style={styles.statusText}>サブスク・課金を検出中...</Text>
           </View>
         );
       case 'error':
@@ -478,9 +612,9 @@ export default function ScanEmailScreen() {
         {/* Description */}
         <View style={styles.descriptionCard}>
           <Icon name="email-search" size={32} color={theme.colors.primary} />
-          <Text style={styles.descriptionTitle}>メールからサブスクを検出</Text>
+          <Text style={styles.descriptionTitle}>メールからサブスク・課金を検出</Text>
           <Text style={styles.descriptionText}>
-            メールに届いている領収書や請求書から、登録中のサブスクリプションを自動で検出します。
+            メールに届いている領収書や請求書から、サブスクリプションや課金情報を自動で検出します。
           </Text>
         </View>
 
@@ -520,7 +654,7 @@ export default function ScanEmailScreen() {
         {status === 'done' && detectedSubscriptions.length > 0 && (
           <View style={styles.resultsSection}>
             <Text style={styles.sectionTitle}>
-              検出されたサブスク ({detectedSubscriptions.length}件)
+              検出されたサブスク・課金 ({detectedSubscriptions.length}件)
             </Text>
 
             {detectedSubscriptions.map((sub) => (
@@ -537,28 +671,40 @@ export default function ScanEmailScreen() {
                   )}
                 </View>
                 <View style={styles.resultInfo}>
-                  <Text style={styles.resultName}>{sub.name}</Text>
+                  {/* ヘッダー行: アプリ名(回数) と 累計金額 */}
+                  <View style={styles.resultHeader}>
+                    <View style={styles.resultNameRow}>
+                      <Text style={styles.resultName}>
+                        {sub.name}
+                        {sub.paymentCount != null && sub.paymentCount > 0 && (
+                          <Text style={styles.paymentCountText}> ({sub.paymentCount}回)</Text>
+                        )}
+                      </Text>
+                    </View>
+                    {sub.totalPaid != null && sub.totalPaid > 0 && (
+                      <Text style={styles.totalPaidText}>
+                        {formatPrice(sub.totalPaid, sub.currency)}
+                      </Text>
+                    )}
+                  </View>
                   <Text style={styles.resultCategory}>
                     {getCategoryLabel(sub.category)}
                   </Text>
-                  {sub.paymentCount && sub.paymentCount > 0 && (
-                    <Text style={styles.resultHistory}>
-                      {sub.paymentCount}回の支払い履歴 / 累計 {formatPrice(sub.totalPaid || 0, sub.currency)}
-                    </Text>
-                  )}
-                </View>
-                <View style={styles.resultRight}>
-                  {sub.price !== null && sub.price !== undefined ? (
-                    <>
-                      <Text style={styles.resultPrice}>
-                        {formatPrice(sub.price, sub.currency)}
-                      </Text>
-                      <Text style={styles.resultCycle}>
-                        {getBillingCycleLabel(sub.billingCycle)}
-                      </Text>
-                    </>
-                  ) : (
-                    <Text style={styles.resultUnknown}>金額不明</Text>
+                  {/* サブアイテム（内訳）を表示 */}
+                  {sub.subItems && sub.subItems.length > 0 && (
+                    <View style={styles.subItemsContainer}>
+                      {sub.subItems.map((item: SubItem, itemIndex: number) => (
+                        <View key={itemIndex} style={styles.subItemGroup}>
+                          <Text style={styles.subItemName}>{item.name}</Text>
+                          {item.purchases.map((purchase: SubItemPurchase, purchaseIndex: number) => (
+                            <View key={purchaseIndex} style={styles.subItemPurchase}>
+                              <Text style={styles.subItemDate}>{formatShortDate(purchase.date)}</Text>
+                              <Text style={styles.subItemPrice}>{formatPrice(purchase.price, item.currency)}</Text>
+                            </View>
+                          ))}
+                        </View>
+                      ))}
+                    </View>
                   )}
                 </View>
               </TouchableOpacity>
@@ -570,7 +716,7 @@ export default function ScanEmailScreen() {
           <View style={styles.emptyState}>
             <Icon name="check-circle" size={48} color={theme.colors.success} />
             <Text style={styles.emptyText}>
-              新しいサブスクは検出されませんでした
+              新しいサブスク・課金は検出されませんでした
             </Text>
           </View>
         )}
@@ -793,20 +939,77 @@ const createStyles = (theme: ReturnType<typeof useTheme>) =>
     resultInfo: {
       flex: 1,
     },
+    resultHeader: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'flex-start',
+    },
+    resultNameRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+      flexWrap: 'wrap',
+      flex: 1,
+    },
     resultName: {
       fontSize: 16,
       fontWeight: '600',
       color: theme.colors.text,
+    },
+    paymentCountText: {
+      fontSize: 14,
+      fontWeight: '400',
+      color: theme.colors.textSecondary,
+    },
+    totalPaidText: {
+      fontSize: 16,
+      fontWeight: '700',
+      color: theme.colors.primary,
+      marginLeft: 8,
+    },
+    typeBadge: {
+      paddingHorizontal: 8,
+      paddingVertical: 2,
+      borderRadius: 4,
+    },
+    typeBadgeText: {
+      fontSize: 11,
+      fontWeight: '600',
     },
     resultCategory: {
       fontSize: 13,
       color: theme.colors.textSecondary,
       marginTop: 2,
     },
-    resultHistory: {
+    subItemsContainer: {
+      marginTop: 8,
+      paddingTop: 8,
+      borderTopWidth: 1,
+      borderTopColor: theme.colors.border,
+    },
+    subItemGroup: {
+      marginBottom: 8,
+    },
+    subItemName: {
+      fontSize: 13,
+      fontWeight: '500',
+      color: theme.colors.text,
+      marginBottom: 2,
+    },
+    subItemPurchase: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      marginLeft: 8,
+      marginTop: 2,
+    },
+    subItemDate: {
       fontSize: 12,
-      color: theme.colors.primary,
-      marginTop: 4,
+      color: theme.colors.textSecondary,
+      width: 40,
+    },
+    subItemPrice: {
+      fontSize: 12,
+      color: theme.colors.textSecondary,
     },
     resultRight: {
       alignItems: 'flex-end',

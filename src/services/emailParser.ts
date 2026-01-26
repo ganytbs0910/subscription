@@ -17,6 +17,22 @@ export interface PaymentHistoryItem {
   subject?: string;
 }
 
+// 個別の購入記録
+export interface SubItemPurchase {
+  date: string;           // 購入日
+  price: number;          // 金額
+}
+
+// アイテム別内訳（同じアプリ内の異なる課金アイテム）
+export interface SubItem {
+  name: string;           // アイテム名
+  currency: string;
+  purchases: SubItemPurchase[];  // 個別の購入履歴
+  totalPaid: number;      // このアイテムの累計
+}
+
+export type DetectionType = 'subscription' | 'payment';
+
 export interface DetectedSubscription {
   name: string;
   category: Category;
@@ -29,6 +45,10 @@ export interface DetectedSubscription {
   paymentHistory?: PaymentHistoryItem[];
   totalPaid?: number;
   paymentCount?: number;
+  // 検出タイプ: subscription（継続課金）または payment（単発課金）
+  type: DetectionType;
+  // アイテム別内訳（同じアプリ内の異なる課金アイテム）
+  subItems?: SubItem[];
 }
 
 interface ServicePattern {
@@ -122,6 +142,16 @@ const SERVICE_PATTERNS: ServicePattern[] = [
   { pattern: /amazon\s*prime(?!\s*video)/i, name: 'Amazon Prime', category: 'other', color: '#FF9900' },
   { pattern: /apple\s*one/i, name: 'Apple One', category: 'other', color: '#000000' },
   { pattern: /apple\s*tv\+?/i, name: 'Apple TV+', category: 'streaming', color: '#000000' },
+
+  // App Store / Google Play (一般的なアプリ課金)
+  { pattern: /app\s*store|itunes/i, name: 'App Store', category: 'other', color: '#007AFF' },
+  { pattern: /google\s*play/i, name: 'Google Play', category: 'other', color: '#01875F' },
+
+  // EC / Shopping
+  { pattern: /amazon(?!\s*(prime|music|video))/i, name: 'Amazon', category: 'other', color: '#FF9900' },
+  { pattern: /楽天市場|rakuten/i, name: '楽天', category: 'other', color: '#BF0000' },
+  { pattern: /yahoo.*ショッピング|paypay.*モール/i, name: 'Yahoo!ショッピング', category: 'other', color: '#FF0033' },
+  { pattern: /mercari|メルカリ/i, name: 'メルカリ', category: 'other', color: '#FF0211' },
 ];
 
 // 金額を抽出するパターン（優先度順）
@@ -337,9 +367,204 @@ const extractBillingCycle = (text: string): BillingCycle | null => {
   return null;
 };
 
-export const parseEmailForSubscription = (
+// 送信者メールアドレスからサービス名を抽出
+const extractServiceNameFromEmail = (fromHeader: string): string => {
+  // "Name <email@example.com>" または "email@example.com" から名前を抽出
+  const nameMatch = fromHeader.match(/^"?([^"<]+)"?\s*</);
+  if (nameMatch && nameMatch[1].trim()) {
+    const name = nameMatch[1].trim();
+    // 一般的な接尾辞を除去
+    return name
+      .replace(/\s*(noreply|no-reply|support|billing|info|notification|notifications)\s*/gi, '')
+      .replace(/^\s+|\s+$/g, '')
+      || extractDomainName(fromHeader);
+  }
+
+  return extractDomainName(fromHeader);
+};
+
+// メールアドレスからドメイン名を抽出して整形
+const extractDomainName = (fromHeader: string): string => {
+  const emailMatch = fromHeader.match(/<?\s*([^\s<>]+@([^\s<>]+))\s*>?/);
+  if (emailMatch && emailMatch[2]) {
+    const domain = emailMatch[2].toLowerCase();
+    // ドメインからサービス名を生成
+    const parts = domain.split('.');
+    // サブドメインを除去（mail., noreply. など）
+    const mainPart = parts.find(p =>
+      !['mail', 'noreply', 'no-reply', 'email', 'newsletter', 'support', 'billing'].includes(p)
+    ) || parts[0];
+    // 最初の文字を大文字に
+    return mainPart.charAt(0).toUpperCase() + mainPart.slice(1);
+  }
+  return '不明な支払い';
+};
+
+// 支払い/課金関連のメールかどうかを判定
+const isPaymentRelatedEmail = (subject: string, body: string): boolean => {
+  const text = `${subject} ${body}`.toLowerCase();
+  const paymentKeywords = [
+    // 日本語
+    '領収', '請求', '支払', '決済', '課金', '購入', '注文', '精算', '引き落とし',
+    'お買い上げ', 'ご利用', 'ご請求', 'お支払い',
+    // English
+    'receipt', 'invoice', 'payment', 'billing', 'charge', 'charged',
+    'purchase', 'order', 'transaction', 'subscription', 'renewal',
+  ];
+
+  return paymentKeywords.some(keyword => text.includes(keyword));
+};
+
+// サブスク（継続課金）かどうかを判定
+const isSubscriptionPayment = (text: string): boolean => {
+  const subscriptionKeywords = [
+    // 日本語
+    '月額', '年額', '週額', '四半期', '定期', 'サブスクリプション',
+    '自動更新', '継続', '会員', 'メンバーシップ', 'プレミアム',
+    // English
+    'subscription', 'monthly', 'yearly', 'annual', 'weekly', 'quarterly',
+    'recurring', 'renewal', 'membership', 'premium', 'pro plan',
+  ];
+
+  const textLower = text.toLowerCase();
+  return subscriptionKeywords.some(keyword => textLower.includes(keyword));
+};
+
+// Appleの領収書メールかどうかを判定
+const isAppleReceipt = (from: string, subject: string): boolean => {
+  const isFromApple = /no_reply@email\.apple\.com|appleid@id\.apple\.com/i.test(from);
+  const isReceipt = /領収書|receipt/i.test(subject);
+  return isFromApple && isReceipt;
+};
+
+// Apple領収書から複数のアプリ課金を抽出
+interface AppleAppPurchase {
+  appName: string;
+  itemName: string;
+  price: number;
+  currency: string;
+  isSubscription: boolean;
+  billingCycle: BillingCycle | null;
+}
+
+const parseAppleReceipt = (body: string): AppleAppPurchase[] => {
+  const purchases: AppleAppPurchase[] = [];
+
+  // HTMLタグを除去してテキスト化
+  const text = body
+    .replace(/<[^>]+>/g, '\n')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&#165;/g, '¥')
+    .replace(/&yen;/g, '¥')
+    .replace(/\r\n/g, '\n')
+    .replace(/\r/g, '\n');
+
+  console.log('[parseAppleReceipt] Apple領収書をパース中...');
+
+  // 各アプリの課金ブロックを検出
+  // パターン: アプリ名 → アイテム名 → (月額/アプリ内課金など) → 金額(¥XXX)
+  // 「問題を報告する」の直後に金額が来ることが多い
+
+  const lines = text.split('\n').map(l => l.trim()).filter(l => l);
+
+  console.log(`[parseAppleReceipt] 行数: ${lines.length}`);
+
+  // デバッグ: 金額っぽい行を全て表示
+  const priceLines = lines.filter(l => /[¥￥]/.test(l) || /^\d{2,5}$/.test(l));
+  console.log(`[parseAppleReceipt] 金額を含む行:`);
+  priceLines.forEach(l => console.log(`  - "${l}"`));
+
+  let currentApp = '';
+  let currentItem = '';
+  let lookingForPrice = false;
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+
+    // App Storeセクションの開始を検出
+    if (/^App\s*Store$/i.test(line)) {
+      console.log(`[parseAppleReceipt] App Storeセクション開始`);
+      continue;
+    }
+
+    // 金額行を検出 (¥XXX または ￥XXX、または「問題を報告する ¥XXX」形式)
+    let priceMatch = line.match(/^[¥￥]\s*([\d,]+)$/);
+
+    // 「問題を報告する    ¥700」のような形式も対応
+    if (!priceMatch) {
+      priceMatch = line.match(/問題を報告.*[¥￥]\s*([\d,]+)/);
+    }
+
+    // 行末に金額がある形式「何かのテキスト ¥700」
+    if (!priceMatch) {
+      priceMatch = line.match(/[¥￥]\s*([\d,]+)\s*$/);
+    }
+
+    if (priceMatch && currentApp) {
+      const price = parseInt(priceMatch[1].replace(/,/g, ''), 10);
+      if (price > 0 && price < 100000) { // 妥当な範囲
+        // サブスクかどうかを判定
+        const contextText = `${currentApp} ${currentItem}`;
+        const isSubscription = isSubscriptionPayment(contextText);
+        const billingCycle = extractBillingCycle(contextText);
+
+        console.log(`[parseAppleReceipt] ✓ 検出: ${currentApp} - ¥${price} (${isSubscription ? 'サブスク' : '課金'})`);
+
+        purchases.push({
+          appName: currentApp,
+          itemName: currentItem,
+          price,
+          currency: 'JPY',
+          isSubscription,
+          billingCycle,
+        });
+      }
+      currentApp = '';
+      currentItem = '';
+      lookingForPrice = false;
+      continue;
+    }
+
+    // 「問題を報告する」を検出したら次の金額を探す
+    if (/問題を報告/i.test(line) && !/[¥￥]/.test(line)) {
+      lookingForPrice = true;
+      continue;
+    }
+
+    // JCT行や小計行はスキップ
+    if (/^JCT|^小計|^合計|税|%|を含む/i.test(line)) {
+      continue;
+    }
+
+    // アプリ名/アイテム名の候補
+    // アプリ名は通常、英数字や日本語で始まる
+    if (line.length > 1 && line.length < 100) {
+      // 除外パターン
+      if (/^(日付|ご注文番号|書類番号|請求先|更新|APPLE|Amex|Visa|JCB|Mastercard|\d{4}年|nakanishi|滋賀県|JPN|@)/i.test(line)) {
+        continue;
+      }
+
+      // アイテム名っぽい行（大文字英語や「月額」「アプリ内課金」を含む）
+      if (/[A-Z]{2,}|月額|年額|アプリ内課金|Pass|Premium|Plus|Pro|Upgrade/i.test(line)) {
+        currentItem = line;
+        console.log(`[parseAppleReceipt] アイテム候補: "${line}"`);
+      } else if (!currentApp || currentItem) {
+        // 新しいアプリ名
+        currentApp = line;
+        currentItem = '';
+        console.log(`[parseAppleReceipt] アプリ名候補: "${line}"`);
+      }
+    }
+  }
+
+  console.log(`[parseAppleReceipt] 検出結果: ${purchases.length}件`);
+  return purchases;
+};
+
+// 1つのメールから複数の課金を抽出（Apple領収書対応）
+export const parseEmailForSubscriptions = (
   email: GmailMessageDetail,
-): DetectedSubscription | null => {
+): DetectedSubscription[] => {
   const subject = extractHeader(email, 'Subject');
   const from = extractHeader(email, 'From');
   const date = extractHeader(email, 'Date');
@@ -347,11 +572,50 @@ export const parseEmailForSubscription = (
   const snippet = email.snippet || '';
 
   const fullText = `${subject} ${from} ${body} ${snippet}`;
+  const results: DetectedSubscription[] = [];
 
+  // Apple領収書の場合は専用パーサーを使用
+  if (isAppleReceipt(from, subject)) {
+    const purchases = parseAppleReceipt(body);
+
+    for (const purchase of purchases) {
+      // アプリ名で既知のサービスを検索
+      let category: Category = 'other';
+      let serviceName = purchase.appName;
+
+      for (const service of SERVICE_PATTERNS) {
+        if (service.pattern.test(purchase.appName) || service.pattern.test(purchase.itemName)) {
+          serviceName = service.name;
+          category = service.category;
+          break;
+        }
+      }
+
+      results.push({
+        name: serviceName,
+        category,
+        price: purchase.price,
+        currency: purchase.currency,
+        billingCycle: purchase.billingCycle,
+        email: from,
+        detectedDate: date || new Date().toISOString(),
+        confidence: 0.85, // Apple領収書は信頼度高め
+        type: purchase.isSubscription ? 'subscription' : 'payment',
+      });
+    }
+
+    // Apple領収書から課金が抽出できた場合はそれを返す
+    if (results.length > 0) {
+      return results;
+    }
+  }
+
+  // 1. 既知のサービスパターンにマッチするか確認
   for (const service of SERVICE_PATTERNS) {
     if (service.pattern.test(fullText)) {
       const priceInfo = extractPrice(fullText);
       const billingCycle = extractBillingCycle(fullText);
+      const isSubscription = isSubscriptionPayment(fullText);
 
       // 信頼度を計算
       let confidence = 0.5;
@@ -359,7 +623,7 @@ export const parseEmailForSubscription = (
       if (billingCycle) confidence += 0.15;
       if (/receipt|invoice|領収|請求|支払/i.test(subject)) confidence += 0.15;
 
-      return {
+      results.push({
         name: service.name,
         category: service.category,
         price: priceInfo?.price ?? null,
@@ -368,11 +632,54 @@ export const parseEmailForSubscription = (
         email: from,
         detectedDate: date || new Date().toISOString(),
         confidence,
-      };
+        type: isSubscription || billingCycle ? 'subscription' : 'payment',
+      });
+
+      return results;
     }
   }
 
-  return null;
+  // 2. 既知のサービスにマッチしないが、支払い関連のメールかどうか確認
+  if (isPaymentRelatedEmail(subject, body)) {
+    const priceInfo = extractPrice(fullText);
+
+    // 金額が検出できない場合はスキップ（誤検出防止）
+    if (!priceInfo) {
+      return results;
+    }
+
+    const billingCycle = extractBillingCycle(fullText);
+    const serviceName = extractServiceNameFromEmail(from);
+    const isSubscription = isSubscriptionPayment(fullText);
+
+    // 信頼度を計算（一般的な検出なので低め）
+    let confidence = 0.3;
+    if (billingCycle) confidence += 0.15;
+    if (/receipt|invoice|領収|請求|支払/i.test(subject)) confidence += 0.15;
+    if (isSubscription) confidence += 0.1;
+
+    results.push({
+      name: serviceName,
+      category: 'other',
+      price: priceInfo.price,
+      currency: priceInfo.currency,
+      billingCycle,
+      email: from,
+      detectedDate: date || new Date().toISOString(),
+      confidence,
+      type: isSubscription || billingCycle ? 'subscription' : 'payment',
+    });
+  }
+
+  return results;
+};
+
+// 後方互換性のため、1つの結果を返す関数も維持
+export const parseEmailForSubscription = (
+  email: GmailMessageDetail,
+): DetectedSubscription | null => {
+  const results = parseEmailForSubscriptions(email);
+  return results.length > 0 ? results[0] : null;
 };
 
 export const parseMultipleEmails = (
@@ -385,42 +692,47 @@ export const parseMultipleEmails = (
   }>();
 
   for (const email of emails) {
-    const subscription = parseEmailForSubscription(email);
-    if (!subscription) continue;
+    // 1つのメールから複数の課金を抽出（Apple領収書対応）
+    const subscriptions = parseEmailForSubscriptions(email);
+    if (subscriptions.length === 0) continue;
 
-    const existing = serviceMap.get(subscription.name);
+    const emailSubject = extractHeader(email, 'Subject');
 
-    // 支払い履歴として追加（価格が検出できた場合）
-    const paymentItem: PaymentHistoryItem | null = subscription.price
-      ? {
-          date: subscription.detectedDate,
-          price: subscription.price,
-          currency: subscription.currency || 'JPY',
-          subject: extractHeader(email, 'Subject'),
+    for (const subscription of subscriptions) {
+      const existing = serviceMap.get(subscription.name);
+
+      // 支払い履歴として追加（価格が検出できた場合）
+      const paymentItem: PaymentHistoryItem | null = subscription.price
+        ? {
+            date: subscription.detectedDate,
+            price: subscription.price,
+            currency: subscription.currency || 'JPY',
+            subject: emailSubject,
+          }
+        : null;
+
+      if (existing) {
+        // 既存のサービスに支払い履歴を追加
+        if (paymentItem) {
+          existing.paymentHistory.push(paymentItem);
         }
-      : null;
-
-    if (existing) {
-      // 既存のサービスに支払い履歴を追加
-      if (paymentItem) {
-        existing.paymentHistory.push(paymentItem);
-      }
-      // より高い信頼度の情報で更新
-      if (subscription.confidence > existing.subscription.confidence) {
-        existing.subscription = {
-          ...subscription,
-          paymentHistory: existing.paymentHistory,
-        };
-      }
-    } else {
-      // 新しいサービスとして追加
-      serviceMap.set(subscription.name, {
-        subscription: {
-          ...subscription,
+        // より高い信頼度の情報で更新
+        if (subscription.confidence > existing.subscription.confidence) {
+          existing.subscription = {
+            ...subscription,
+            paymentHistory: existing.paymentHistory,
+          };
+        }
+      } else {
+        // 新しいサービスとして追加
+        serviceMap.set(subscription.name, {
+          subscription: {
+            ...subscription,
+            paymentHistory: paymentItem ? [paymentItem] : [],
+          },
           paymentHistory: paymentItem ? [paymentItem] : [],
-        },
-        paymentHistory: paymentItem ? [paymentItem] : [],
-      });
+        });
+      }
     }
   }
 
@@ -457,23 +769,60 @@ export const convertGmailToGeneric = (
   };
 };
 
-// 汎用メールからサブスク検出
-export const parseGenericEmailForSubscription = (
+// 汎用メールからサブスク/課金検出（複数対応）
+export const parseGenericEmailForSubscriptions = (
   email: GenericEmail,
-): DetectedSubscription | null => {
+): DetectedSubscription[] => {
   const fullText = `${email.subject} ${email.from} ${email.body} ${email.snippet || ''}`;
+  const results: DetectedSubscription[] = [];
 
+  // Apple領収書の場合は専用パーサーを使用
+  if (isAppleReceipt(email.from, email.subject)) {
+    const purchases = parseAppleReceipt(email.body);
+
+    for (const purchase of purchases) {
+      let category: Category = 'other';
+      let serviceName = purchase.appName;
+
+      for (const service of SERVICE_PATTERNS) {
+        if (service.pattern.test(purchase.appName) || service.pattern.test(purchase.itemName)) {
+          serviceName = service.name;
+          category = service.category;
+          break;
+        }
+      }
+
+      results.push({
+        name: serviceName,
+        category,
+        price: purchase.price,
+        currency: purchase.currency,
+        billingCycle: purchase.billingCycle,
+        email: email.from,
+        detectedDate: email.date,
+        confidence: 0.85,
+        type: purchase.isSubscription ? 'subscription' : 'payment',
+      });
+    }
+
+    if (results.length > 0) {
+      return results;
+    }
+  }
+
+  // 1. 既知のサービスパターンにマッチするか確認
   for (const service of SERVICE_PATTERNS) {
     if (service.pattern.test(fullText)) {
       const priceInfo = extractPrice(fullText);
       const billingCycle = extractBillingCycle(fullText);
+      const isSubscription = isSubscriptionPayment(fullText);
 
       let confidence = 0.5;
       if (priceInfo) confidence += 0.2;
       if (billingCycle) confidence += 0.15;
       if (/receipt|invoice|領収|請求|支払/i.test(email.subject)) confidence += 0.15;
 
-      return {
+      results.push({
         name: service.name,
         category: service.category,
         price: priceInfo?.price ?? null,
@@ -482,14 +831,55 @@ export const parseGenericEmailForSubscription = (
         email: email.from,
         detectedDate: email.date,
         confidence,
-      };
+        type: isSubscription || billingCycle ? 'subscription' : 'payment',
+      });
+
+      return results;
     }
   }
 
-  return null;
+  // 2. 既知のサービスにマッチしないが、支払い関連のメールかどうか確認
+  if (isPaymentRelatedEmail(email.subject, email.body)) {
+    const priceInfo = extractPrice(fullText);
+
+    if (!priceInfo) {
+      return results;
+    }
+
+    const billingCycle = extractBillingCycle(fullText);
+    const serviceName = extractServiceNameFromEmail(email.from);
+    const isSubscription = isSubscriptionPayment(fullText);
+
+    let confidence = 0.3;
+    if (billingCycle) confidence += 0.15;
+    if (/receipt|invoice|領収|請求|支払/i.test(email.subject)) confidence += 0.15;
+    if (isSubscription) confidence += 0.1;
+
+    results.push({
+      name: serviceName,
+      category: 'other',
+      price: priceInfo.price,
+      currency: priceInfo.currency,
+      billingCycle,
+      email: email.from,
+      detectedDate: email.date,
+      confidence,
+      type: isSubscription || billingCycle ? 'subscription' : 'payment',
+    });
+  }
+
+  return results;
 };
 
-// 汎用メール配列からサブスク検出
+// 後方互換性のため
+export const parseGenericEmailForSubscription = (
+  email: GenericEmail,
+): DetectedSubscription | null => {
+  const results = parseGenericEmailForSubscriptions(email);
+  return results.length > 0 ? results[0] : null;
+};
+
+// 汎用メール配列からサブスク/課金検出
 export const parseMultipleGenericEmails = (
   emails: GenericEmail[],
 ): DetectedSubscription[] => {
@@ -500,42 +890,45 @@ export const parseMultipleGenericEmails = (
   }>();
 
   for (const email of emails) {
-    const subscription = parseGenericEmailForSubscription(email);
-    if (!subscription) continue;
+    // 1つのメールから複数の課金を抽出（Apple領収書対応）
+    const subscriptions = parseGenericEmailForSubscriptions(email);
+    if (subscriptions.length === 0) continue;
 
-    const existing = serviceMap.get(subscription.name);
+    for (const subscription of subscriptions) {
+      const existing = serviceMap.get(subscription.name);
 
-    // 支払い履歴として追加（価格が検出できた場合）
-    const paymentItem: PaymentHistoryItem | null = subscription.price
-      ? {
-          date: subscription.detectedDate,
-          price: subscription.price,
-          currency: subscription.currency || 'JPY',
-          subject: email.subject,
+      // 支払い履歴として追加（価格が検出できた場合）
+      const paymentItem: PaymentHistoryItem | null = subscription.price
+        ? {
+            date: subscription.detectedDate,
+            price: subscription.price,
+            currency: subscription.currency || 'JPY',
+            subject: email.subject,
+          }
+        : null;
+
+      if (existing) {
+        // 既存のサービスに支払い履歴を追加
+        if (paymentItem) {
+          existing.paymentHistory.push(paymentItem);
         }
-      : null;
-
-    if (existing) {
-      // 既存のサービスに支払い履歴を追加
-      if (paymentItem) {
-        existing.paymentHistory.push(paymentItem);
-      }
-      // より高い信頼度の情報で更新
-      if (subscription.confidence > existing.subscription.confidence) {
-        existing.subscription = {
-          ...subscription,
-          paymentHistory: existing.paymentHistory,
-        };
-      }
-    } else {
-      // 新しいサービスとして追加
-      serviceMap.set(subscription.name, {
-        subscription: {
-          ...subscription,
+        // より高い信頼度の情報で更新
+        if (subscription.confidence > existing.subscription.confidence) {
+          existing.subscription = {
+            ...subscription,
+            paymentHistory: existing.paymentHistory,
+          };
+        }
+      } else {
+        // 新しいサービスとして追加
+        serviceMap.set(subscription.name, {
+          subscription: {
+            ...subscription,
+            paymentHistory: paymentItem ? [paymentItem] : [],
+          },
           paymentHistory: paymentItem ? [paymentItem] : [],
-        },
-        paymentHistory: paymentItem ? [paymentItem] : [],
-      });
+        });
+      }
     }
   }
 

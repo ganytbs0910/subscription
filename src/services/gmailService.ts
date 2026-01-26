@@ -26,14 +26,18 @@ export const fetchSubscriptionEmails = async (
   maxResults?: number, // undefinedなら全件取得
   onProgress?: (fetched: number) => void,
 ): Promise<GmailMessage[]> => {
-  // サブスク関連のメールを検索するクエリ（送信者制限なし）
-  // 請求書・領収書関連のキーワードで幅広く検索
+  // 課金メールを送る主要な送信者に絞って検索（効率重視）
   const query = encodeURIComponent(
-    'subject:(receipt OR invoice OR payment OR billing OR subscription OR 領収書 OR 領収 OR 請求書 OR 請求 OR お支払い OR 支払い OR サブスクリプション OR 月額 OR 年額 OR 更新 OR renewal OR renewed OR charge OR charged)'
+    'from:no_reply@email.apple.com OR ' +           // Apple
+    'from:googleplay-noreply@google.com OR ' +      // Google Play
+    'from:auto-confirm@amazon.co.jp OR ' +          // Amazon Japan
+    'from:digital-no-reply@amazon.co.jp'            // Amazon Digital
   );
 
   const allMessages: GmailMessage[] = [];
   let pageToken: string | undefined;
+
+  console.log('[Gmail] 検索クエリ:', decodeURIComponent(query).substring(0, 200) + '...');
 
   // ページネーションで取得（maxResultsがundefinedなら全件）
   while (true) {
@@ -46,6 +50,7 @@ export const fetchSubscriptionEmails = async (
       ? `${GMAIL_API_BASE}/messages?q=${query}&maxResults=100&pageToken=${pageToken}`
       : `${GMAIL_API_BASE}/messages?q=${query}&maxResults=100`;
 
+    console.log('[Gmail] APIリクエスト中...');
     const response = await fetch(url, {
       headers: {
         Authorization: `Bearer ${accessToken}`,
@@ -53,12 +58,14 @@ export const fetchSubscriptionEmails = async (
     });
 
     if (!response.ok) {
-      const error = await response.json();
+      const error = await response.json() as any;
+      console.error('[Gmail] APIエラー:', error);
       throw new Error(error.error?.message || 'Failed to fetch emails');
     }
 
-    const data = await response.json();
+    const data = await response.json() as any;
     const messages = data.messages || [];
+    console.log(`[Gmail] 取得: ${messages.length}件 (累計: ${allMessages.length + messages.length}件)`);
     allMessages.push(...messages);
 
     // 進捗を通知
