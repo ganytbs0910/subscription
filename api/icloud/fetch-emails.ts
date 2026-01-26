@@ -331,75 +331,76 @@ function extractApplePurchases(subject: string, body: string): ApplePurchase[] {
 
   const lines = body.split(/[\n\r]+/).map(l => l.trim()).filter(l => l.length > 0);
 
-  // アプリ名 + 金額の行を探す（金額が行末にある）
-  const appPricePattern = /^(.+?)\s{2,}[¥￥]\s*([\d,]+)$/;
+  console.log(`[APPLE PARSE] Lines count: ${lines.length}`);
 
-  // 無視するアプリ名パターン
-  const ignoreAppPatterns = [
-    /^App\s*Store$/i,
-    /合計[:：]?$/,
-    /^小計[:：]?$/,
-    /APPLE\s*ID/i,
-    /^請求先$/,
-    /^日付[:：]/,
-    /^ご注文番号/,
-    /^書類番号/,
-    /^PayPay/i,
-    /クレジット合計/,
-    /^-+$/,  // ダッシュのみの行
+  // 無視するパターン
+  const ignorePatterns = [
+    /^App\s*Store$/i, /合計/, /^小計/, /APPLE\s*(ID|ACCOUNT)/i,
+    /^請求先$/, /^日付/, /^ご注文番号/, /^書類番号/, /^PayPay/i,
+    /クレジット/, /^-+$/, /^JCT/, /課税/, /Amex|Visa|JCB|Mastercard/i,
+    /^\d{3}-\d{4}/, /^JPN$/, /@.*\.com/, /滋賀県|草津市|栗東市/,
   ];
 
-  const isIgnoredApp = (appName: string) => ignoreAppPatterns.some(p => p.test(appName));
+  const isIgnored = (text: string) => ignorePatterns.some(p => p.test(text));
 
+  // 方法1: 「問題を報告する ¥XXX」パターンを探して、前の行からアプリ名を取得
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
-    const priceMatch = line.match(appPricePattern);
 
-    if (priceMatch && !isIgnoredApp(priceMatch[1].trim())) {
-      const appName = priceMatch[1].trim();
-      const price = parseInt(priceMatch[2].replace(/,/g, ''), 10);
+    // 「問題を報告する ¥700」形式を検出
+    const reportPriceMatch = line.match(/問題を報告.*?[¥￥]\s*([\d,]+)/);
+    if (reportPriceMatch) {
+      const price = parseInt(reportPriceMatch[1].replace(/,/g, ''), 10);
+      if (price < 50 || price > 100000) continue;
 
-      // 次の行でアイテム名を取得
+      // 前の数行を遡ってアプリ名とアイテム名を探す
+      let appName: string | null = null;
       let itemName: string | null = null;
       let purchaseType: 'subscription' | 'in_app_purchase' | 'purchase' = 'purchase';
       let billingCycle: BillingCycle | undefined;
 
-      if (i + 1 < lines.length) {
-        const nextLine = lines[i + 1];
-        // 次の行が金額でない場合はアイテム名
-        if (!nextLine.match(/^[¥￥]/) && !nextLine.match(appPricePattern)) {
-          itemName = nextLine;
-        }
-      }
+      for (let j = i - 1; j >= Math.max(0, i - 6); j--) {
+        const prevLine = lines[j];
+        if (isIgnored(prevLine)) continue;
 
-      // アプリ内課金かサブスクかを判定
-      for (let j = i + 1; j < Math.min(lines.length, i + 4); j++) {
-        if (lines[j] === 'アプリ内課金' || lines[j] === 'App 内課金') {
-          purchaseType = 'in_app_purchase';
-          break;
-        }
-        if (lines[j].includes('更新：') || lines[j].includes('(月額)') || lines[j].includes('（月額）')) {
+        // 更新日/アプリ内課金の判定
+        if (prevLine.includes('更新：') || prevLine.includes('(月額)') || prevLine.includes('（月額）')) {
           purchaseType = 'subscription';
           billingCycle = 'monthly';
-          break;
+          continue;
         }
-        if (lines[j].includes('(年額)') || lines[j].includes('（年額）')) {
+        if (prevLine.includes('(年額)') || prevLine.includes('（年額）')) {
           purchaseType = 'subscription';
           billingCycle = 'yearly';
+          continue;
+        }
+        if (prevLine === 'アプリ内課金' || prevLine === 'App 内課金') {
+          purchaseType = 'in_app_purchase';
+          continue;
+        }
+
+        // アイテム名（大文字英語、月額、Pass等を含む行）
+        if (!itemName && /[A-Z]{2,}|月額|年額|Pass|Premium|Plus|Pro|Coin|パック|UPGRADE/i.test(prevLine)) {
+          itemName = prevLine;
+          continue;
+        }
+
+        // アプリ名（それ以外の有効な行）
+        if (!appName && prevLine.length > 1 && prevLine.length < 50 && !prevLine.match(/^[¥￥\d]/)) {
+          appName = prevLine;
           break;
         }
       }
 
-      // 金額が50円以上の場合のみ追加
-      if (price >= 50) {
-        // カテゴリを推測
+      if (appName) {
         let category: Category = 'gaming';
-        if (/YouTube|Netflix|Disney|Hulu|Prime/i.test(appName)) category = 'streaming';
+        if (/YouTube|Netflix|Disney|Hulu|Prime|ARK/i.test(appName)) category = 'streaming';
         if (/Spotify|Music|AWA/i.test(appName)) category = 'music';
         if (/iCloud|Dropbox|Google/i.test(appName)) category = 'cloud';
         if (/Twitter|X\s/i.test(appName)) category = 'other';
         if (/Tinder|マッチング/i.test(appName)) category = 'other';
 
+        console.log(`[APPLE PARSE] Found: ${appName} - ${itemName} - ¥${price}`);
         purchases.push({
           name: appName,
           item: itemName,
@@ -413,6 +414,62 @@ function extractApplePurchases(subject: string, body: string): ApplePurchase[] {
     }
   }
 
+  // 方法2: 従来の「アプリ名    ¥700」形式（同一行）
+  const appPricePattern = /^(.+?)\s{2,}[¥￥]\s*([\d,]+)$/;
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const priceMatch = line.match(appPricePattern);
+
+    if (priceMatch && !isIgnored(priceMatch[1].trim())) {
+      const appName = priceMatch[1].trim();
+      const price = parseInt(priceMatch[2].replace(/,/g, ''), 10);
+
+      // 既に同じアプリ・同じ金額で追加済みなら重複を避ける
+      const isDuplicate = purchases.some(p => p.name === appName && p.price === price);
+      if (isDuplicate) continue;
+
+      if (price >= 50 && price <= 100000) {
+        let itemName: string | null = null;
+        let purchaseType: 'subscription' | 'in_app_purchase' | 'purchase' = 'purchase';
+        let billingCycle: BillingCycle | undefined;
+
+        // 次の数行をチェック
+        for (let j = i + 1; j < Math.min(lines.length, i + 4); j++) {
+          const nextLine = lines[j];
+          if (nextLine === 'アプリ内課金' || nextLine === 'App 内課金') {
+            purchaseType = 'in_app_purchase';
+          } else if (nextLine.includes('更新：') || nextLine.includes('(月額)')) {
+            purchaseType = 'subscription';
+            billingCycle = 'monthly';
+          } else if (nextLine.includes('(年額)')) {
+            purchaseType = 'subscription';
+            billingCycle = 'yearly';
+          } else if (!itemName && !nextLine.match(/^[¥￥]/) && !isIgnored(nextLine)) {
+            itemName = nextLine;
+          }
+        }
+
+        let category: Category = 'gaming';
+        if (/YouTube|Netflix|Disney|Hulu|Prime|ARK/i.test(appName)) category = 'streaming';
+        if (/Spotify|Music|AWA/i.test(appName)) category = 'music';
+        if (/iCloud|Dropbox|Google/i.test(appName)) category = 'cloud';
+        if (/Twitter|X\s/i.test(appName)) category = 'other';
+
+        console.log(`[APPLE PARSE] Found (pattern2): ${appName} - ${itemName} - ¥${price}`);
+        purchases.push({
+          name: appName,
+          item: itemName,
+          category,
+          price,
+          currency: 'JPY',
+          purchaseType,
+          billingCycle,
+        });
+      }
+    }
+  }
+
+  console.log(`[APPLE PARSE] Total purchases found: ${purchases.length}`);
   return purchases;
 }
 
