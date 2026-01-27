@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   View,
   Text,
@@ -6,6 +6,7 @@ import {
   ScrollView,
   TouchableOpacity,
   Alert,
+  TextInput,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 
@@ -18,6 +19,9 @@ type ThemeOption = 'light' | 'dark' | 'system';
 export default function SettingsScreen() {
   const theme = useTheme();
   const { settings, updateSettings, subscriptions } = useSubscriptionStore();
+  const [budgetText, setBudgetText] = useState(
+    settings.monthlyBudget?.toString() || ''
+  );
 
   const styles = createStyles(theme);
 
@@ -106,6 +110,31 @@ export default function SettingsScreen() {
               )}
             </TouchableOpacity>
           ))}
+        </View>
+      </View>
+
+      <View style={styles.section}>
+        <Text style={styles.sectionTitle}>月間予算</Text>
+        <View style={styles.card}>
+          <View style={styles.budgetRow}>
+            <Text style={styles.budgetSymbol}>¥</Text>
+            <TextInput
+              style={styles.budgetInput}
+              value={budgetText}
+              onChangeText={(text) => {
+                setBudgetText(text);
+                const num = Number(text);
+                if (text === '') {
+                  updateSettings({ monthlyBudget: undefined });
+                } else if (!isNaN(num) && num >= 0) {
+                  updateSettings({ monthlyBudget: num });
+                }
+              }}
+              placeholder="未設定"
+              placeholderTextColor={theme.colors.textSecondary}
+              keyboardType="numeric"
+            />
+          </View>
         </View>
       </View>
 
@@ -213,6 +242,23 @@ const createStyles = (theme: ReturnType<typeof useTheme>) =>
       fontSize: 16,
       fontWeight: '600',
       color: theme.colors.primary,
+    },
+    budgetRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      padding: 16,
+    },
+    budgetSymbol: {
+      fontSize: 18,
+      fontWeight: '600',
+      color: theme.colors.primary,
+      marginRight: 8,
+    },
+    budgetInput: {
+      flex: 1,
+      fontSize: 18,
+      color: theme.colors.text,
+      padding: 0,
     },
     footer: {
       alignItems: 'center',

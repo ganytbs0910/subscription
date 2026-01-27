@@ -6,6 +6,9 @@ import {
   FlatList,
   TouchableOpacity,
   SectionList,
+  TextInput,
+  LayoutAnimation,
+  Alert,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -13,20 +16,24 @@ import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 
 import { useTheme } from '../../hooks/useTheme';
 import { useSubscriptionStore } from '../../stores/subscriptionStore';
-import { formatPrice, calculateTotalMonthly } from '../../utils/calculations';
+import { formatPrice, calculateTotalMonthly, getDaysUntilNextBilling } from '../../utils/calculations';
 import { getCategoryLabel, getBillingCycleLabel, CATEGORIES } from '../../utils/presets';
+import SwipeableRow from '../../components/SwipeableRow';
 import type { RootStackParamList, Subscription } from '../../types';
 
 type NavigationProp = NativeStackNavigationProp<RootStackParamList>;
 type ViewMode = 'list' | 'category';
 type FilterMode = 'all' | 'active' | 'cancelled';
+type SortMode = 'name' | 'price' | 'nextBilling';
 
 export default function SubscriptionListScreen() {
   const theme = useTheme();
   const navigation = useNavigation<NavigationProp>();
-  const { subscriptions, settings } = useSubscriptionStore();
+  const { subscriptions, settings, deleteSubscription } = useSubscriptionStore();
   const [viewMode, setViewMode] = useState<ViewMode>('list');
   const [filterMode, setFilterMode] = useState<FilterMode>('all');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [sortMode, setSortMode] = useState<SortMode>('name');
 
   const activeCount = useMemo(() =>
     subscriptions.filter(s => s.isActive).length,
@@ -39,10 +46,24 @@ export default function SubscriptionListScreen() {
   );
 
   const filteredSubscriptions = useMemo(() => {
-    if (filterMode === 'active') return subscriptions.filter(s => s.isActive);
-    if (filterMode === 'cancelled') return subscriptions.filter(s => !s.isActive);
-    return subscriptions;
-  }, [subscriptions, filterMode]);
+    let result = subscriptions;
+    if (filterMode === 'active') result = result.filter(s => s.isActive);
+    if (filterMode === 'cancelled') result = result.filter(s => !s.isActive);
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase();
+      result = result.filter(s => s.name.toLowerCase().includes(q));
+    }
+    // Sort
+    result = [...result].sort((a, b) => {
+      if (sortMode === 'name') return a.name.localeCompare(b.name);
+      if (sortMode === 'price') return b.price - a.price;
+      if (sortMode === 'nextBilling') {
+        return getDaysUntilNextBilling(a.nextBillingDate) - getDaysUntilNextBilling(b.nextBillingDate);
+      }
+      return 0;
+    });
+    return result;
+  }, [subscriptions, filterMode, searchQuery, sortMode]);
 
   const monthlyTotal = useMemo(() =>
     calculateTotalMonthly(subscriptions.filter(s => s.isActive)),
@@ -51,42 +72,57 @@ export default function SubscriptionListScreen() {
 
   const styles = createStyles(theme);
 
+  const handleDeleteItem = (item: Subscription) => {
+    Alert.alert('削除確認', `「${item.name}」を削除しますか？`, [
+      { text: 'キャンセル', style: 'cancel' },
+      {
+        text: '削除',
+        style: 'destructive',
+        onPress: () => deleteSubscription(item.id),
+      },
+    ]);
+  };
+
   const renderSubscriptionItem = ({ item }: { item: Subscription }) => (
-    <TouchableOpacity
-      style={styles.subscriptionCard}
-      onPress={() =>
-        navigation.navigate('SubscriptionDetail', { subscriptionId: item.id })
-      }
-      activeOpacity={0.7}
+    <SwipeableRow
+      onDelete={() => handleDeleteItem(item)}
     >
-      <View
-        style={[
-          styles.iconContainer,
-          { backgroundColor: item.color || theme.colors.primary },
-          !item.isActive && styles.iconContainerInactive,
-        ]}
+      <TouchableOpacity
+        style={styles.subscriptionCard}
+        onPress={() =>
+          navigation.navigate('SubscriptionDetail', { subscriptionId: item.id })
+        }
+        activeOpacity={0.7}
       >
-        <Icon name={item.icon || 'credit-card'} size={22} color="#FFFFFF" />
-      </View>
-      <View style={styles.subscriptionInfo}>
-        <View style={styles.nameRow}>
-          <Text style={[styles.subscriptionName, !item.isActive && styles.textInactive]}>
-            {item.name}
-          </Text>
-          {!item.isActive && (
-            <View style={styles.inactiveBadge}>
-              <Text style={styles.inactiveBadgeText}>解約済み</Text>
-            </View>
-          )}
+        <View
+          style={[
+            styles.iconContainer,
+            { backgroundColor: item.color || theme.colors.primary },
+            !item.isActive && styles.iconContainerInactive,
+          ]}
+        >
+          <Icon name={item.icon || 'credit-card'} size={22} color="#FFFFFF" />
         </View>
-        <Text style={styles.subscriptionMeta}>
-          {getBillingCycleLabel(item.billingCycle)}
+        <View style={styles.subscriptionInfo}>
+          <View style={styles.nameRow}>
+            <Text style={[styles.subscriptionName, !item.isActive && styles.textInactive]}>
+              {item.name}
+            </Text>
+            {!item.isActive && (
+              <View style={styles.inactiveBadge}>
+                <Text style={styles.inactiveBadgeText}>解約済み</Text>
+              </View>
+            )}
+          </View>
+          <Text style={styles.subscriptionMeta}>
+            {getBillingCycleLabel(item.billingCycle)}
+          </Text>
+        </View>
+        <Text style={[styles.subscriptionPrice, !item.isActive && styles.textInactive]}>
+          {formatPrice(item.price, item.currency)}
         </Text>
-      </View>
-      <Text style={[styles.subscriptionPrice, !item.isActive && styles.textInactive]}>
-        {formatPrice(item.price, item.currency)}
-      </Text>
-    </TouchableOpacity>
+      </TouchableOpacity>
+    </SwipeableRow>
   );
 
   const groupedByCategory = CATEGORIES.map((category) => ({
@@ -187,6 +223,45 @@ export default function SubscriptionListScreen() {
           </TouchableOpacity>
         </View>
       )}
+
+      {/* 検索バー */}
+      <View style={styles.searchContainer}>
+        <Icon name="magnify" size={20} color={theme.colors.textSecondary} />
+        <TextInput
+          style={styles.searchInput}
+          value={searchQuery}
+          onChangeText={setSearchQuery}
+          placeholder="サブスク名で検索..."
+          placeholderTextColor={theme.colors.textSecondary}
+        />
+        {searchQuery.length > 0 && (
+          <TouchableOpacity onPress={() => setSearchQuery('')}>
+            <Icon name="close-circle" size={18} color={theme.colors.textSecondary} />
+          </TouchableOpacity>
+        )}
+      </View>
+
+      {/* ソートボタン */}
+      <View style={styles.sortContainer}>
+        {([
+          { key: 'name' as SortMode, label: '名前' },
+          { key: 'price' as SortMode, label: '金額' },
+          { key: 'nextBilling' as SortMode, label: '請求日' },
+        ]).map((s) => (
+          <TouchableOpacity
+            key={s.key}
+            style={[styles.sortButton, sortMode === s.key && styles.sortButtonActive]}
+            onPress={() => {
+              LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+              setSortMode(s.key);
+            }}
+          >
+            <Text style={[styles.sortButtonText, sortMode === s.key && styles.sortButtonTextActive]}>
+              {s.label}
+            </Text>
+          </TouchableOpacity>
+        ))}
+      </View>
 
       {/* ツールバー */}
       <View style={styles.toolbar}>
@@ -289,6 +364,46 @@ const createStyles = (theme: ReturnType<typeof useTheme>) =>
     summaryLabel: {
       fontSize: 14,
       color: theme.colors.textSecondary,
+    },
+    searchContainer: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      backgroundColor: theme.colors.card,
+      marginHorizontal: 16,
+      marginTop: 12,
+      borderRadius: 10,
+      paddingHorizontal: 12,
+      paddingVertical: 8,
+      gap: 8,
+    },
+    searchInput: {
+      flex: 1,
+      fontSize: 15,
+      color: theme.colors.text,
+      padding: 0,
+    },
+    sortContainer: {
+      flexDirection: 'row',
+      marginHorizontal: 16,
+      marginTop: 10,
+      gap: 8,
+    },
+    sortButton: {
+      paddingHorizontal: 12,
+      paddingVertical: 6,
+      borderRadius: 8,
+      backgroundColor: theme.colors.card,
+    },
+    sortButtonActive: {
+      backgroundColor: theme.colors.primary,
+    },
+    sortButtonText: {
+      fontSize: 13,
+      fontWeight: '600',
+      color: theme.colors.textSecondary,
+    },
+    sortButtonTextActive: {
+      color: '#FFFFFF',
     },
     filterContainer: {
       flexDirection: 'row',

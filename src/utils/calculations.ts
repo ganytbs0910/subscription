@@ -237,6 +237,44 @@ export const calculateMonthlyPaymentHistory = (
   });
 };
 
+// サブスクリプションの契約年数を取得
+export const getSubscriptionAge = (startDate: string): { years: number; months: number } => {
+  const start = parseISO(startDate);
+  const now = new Date();
+  const totalMonths = differenceInMonths(now, start);
+  return {
+    years: Math.floor(totalMonths / 12),
+    months: totalMonths % 12,
+  };
+};
+
+// 直近2回の支払いから価格変動を検出
+export const detectPriceChange = (sub: Subscription): { changed: boolean; oldPrice: number; newPrice: number } | null => {
+  if (!sub.paymentHistory || sub.paymentHistory.length < 2) return null;
+  const sorted = [...sub.paymentHistory].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+  const newPrice = sorted[0].price;
+  const oldPrice = sorted[1].price;
+  return { changed: newPrice !== oldPrice, oldPrice, newPrice };
+};
+
+// 節約提案を取得（年間コストが高い順）
+export const getSavingSuggestions = (subs: Subscription[]): Array<{ name: string; yearlyAmount: number }> => {
+  return subs
+    .filter((s) => s.isActive)
+    .map((s) => ({
+      name: s.name,
+      yearlyAmount: getYearlyAmount(s.price, s.billingCycle),
+    }))
+    .sort((a, b) => b.yearlyAmount - a.yearlyAmount);
+};
+
+// 解約済みサブスクの月額合計（節約額）
+export const calculateSavedAmount = (subs: Subscription[]): number => {
+  return subs
+    .filter((s) => !s.isActive)
+    .reduce((total, s) => total + getMonthlyAmount(s.price, s.billingCycle), 0);
+};
+
 // 今月と先月の比較
 export const compareWithLastMonth = (
   subscriptions: Subscription[]

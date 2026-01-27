@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useLayoutEffect } from 'react';
 import {
   View,
   Text,
@@ -41,6 +41,23 @@ export default function SubscriptionDetailScreen() {
 
   const styles = createStyles(theme);
 
+  // ヘッダー編集ボタン
+  useLayoutEffect(() => {
+    if (subscription) {
+      navigation.setOptions({
+        headerRight: () => (
+          <TouchableOpacity
+            onPress={() =>
+              navigation.navigate('EditSubscription', { subscriptionId })
+            }
+          >
+            <Icon name="pencil" size={22} color={theme.colors.primary} />
+          </TouchableOpacity>
+        ),
+      });
+    }
+  }, [navigation, subscriptionId, subscription, theme.colors.primary]);
+
   if (!subscription) {
     return (
       <View style={styles.container}>
@@ -58,6 +75,11 @@ export default function SubscriptionDetailScreen() {
     subscription.price,
     subscription.billingCycle
   );
+
+  // コスト予測
+  const forecast3m = monthlyEquivalent * 3;
+  const forecast6m = monthlyEquivalent * 6;
+  const forecast12m = monthlyEquivalent * 12;
 
   const handleToggleActive = () => {
     updateSubscription(subscription.id, { isActive: !subscription.isActive });
@@ -80,6 +102,12 @@ export default function SubscriptionDetailScreen() {
       ]
     );
   };
+
+  const sortedHistory = subscription.paymentHistory
+    ? [...subscription.paymentHistory].sort(
+        (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()
+      )
+    : [];
 
   return (
     <ScrollView style={styles.container}>
@@ -123,6 +151,31 @@ export default function SubscriptionDetailScreen() {
           <Text style={styles.statValue}>
             {formatPrice(yearlyEquivalent, subscription.currency)}
           </Text>
+        </View>
+      </View>
+
+      {/* コスト予測カード */}
+      <View style={styles.forecastSection}>
+        <Text style={styles.sectionTitle}>コスト予測</Text>
+        <View style={styles.forecastRow}>
+          <View style={styles.forecastCard}>
+            <Text style={styles.forecastLabel}>3ヶ月</Text>
+            <Text style={styles.forecastValue}>
+              {formatPrice(forecast3m, subscription.currency)}
+            </Text>
+          </View>
+          <View style={styles.forecastCard}>
+            <Text style={styles.forecastLabel}>6ヶ月</Text>
+            <Text style={styles.forecastValue}>
+              {formatPrice(forecast6m, subscription.currency)}
+            </Text>
+          </View>
+          <View style={styles.forecastCard}>
+            <Text style={styles.forecastLabel}>12ヶ月</Text>
+            <Text style={styles.forecastValue}>
+              {formatPrice(forecast12m, subscription.currency)}
+            </Text>
+          </View>
         </View>
       </View>
 
@@ -205,35 +258,51 @@ export default function SubscriptionDetailScreen() {
         )}
       </View>
 
-      {subscription.paymentHistory && subscription.paymentHistory.length > 0 && (
+      {/* 支払いタイムライン */}
+      {sortedHistory.length > 0 && (
         <View style={styles.historySection}>
           <Text style={styles.sectionTitle}>
-            支払い履歴 ({subscription.paymentHistory.length}件)
+            支払いタイムライン ({sortedHistory.length}件)
           </Text>
-          {subscription.paymentHistory
-            .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
-            .slice(0, 10)
-            .map((payment, index) => (
-              <View key={index} style={styles.historyItem}>
-                <View style={styles.historyDate}>
-                  <Text style={styles.historyDateText}>
-                    {formatDate(payment.date)}
-                  </Text>
-                </View>
-                <Text style={styles.historyPrice}>
+          {sortedHistory.slice(0, 10).map((payment, index) => (
+            <View key={index} style={styles.timelineItem}>
+              <View style={styles.timelineLine}>
+                <View style={styles.timelineDot} />
+                {index < Math.min(sortedHistory.length, 10) - 1 && (
+                  <View style={styles.timelineConnector} />
+                )}
+              </View>
+              <View style={styles.timelineContent}>
+                <Text style={styles.timelineDate}>
+                  {formatDate(payment.date)}
+                </Text>
+                <Text style={styles.timelinePrice}>
                   {formatPrice(payment.price, payment.currency)}
                 </Text>
               </View>
-            ))}
-          {subscription.paymentHistory.length > 10 && (
+            </View>
+          ))}
+          {sortedHistory.length > 10 && (
             <Text style={styles.historyMore}>
-              他 {subscription.paymentHistory.length - 10} 件
+              他 {sortedHistory.length - 10} 件
             </Text>
           )}
         </View>
       )}
 
       <View style={styles.actions}>
+        <TouchableOpacity
+          style={[styles.actionButton, styles.editButton]}
+          onPress={() =>
+            navigation.navigate('EditSubscription', { subscriptionId })
+          }
+        >
+          <Icon name="pencil" size={20} color={theme.colors.primary} />
+          <Text style={[styles.actionButtonText, { color: theme.colors.primary }]}>
+            編集する
+          </Text>
+        </TouchableOpacity>
+
         <TouchableOpacity
           style={[styles.actionButton, styles.toggleButton]}
           onPress={handleToggleActive}
@@ -338,6 +407,37 @@ const createStyles = (theme: ReturnType<typeof useTheme>) =>
       fontWeight: '600',
       color: theme.colors.text,
     },
+    forecastSection: {
+      paddingHorizontal: 16,
+      marginBottom: 16,
+    },
+    sectionTitle: {
+      fontSize: 16,
+      fontWeight: '600',
+      color: theme.colors.text,
+      marginBottom: 12,
+    },
+    forecastRow: {
+      flexDirection: 'row',
+      gap: 10,
+    },
+    forecastCard: {
+      flex: 1,
+      backgroundColor: theme.colors.card,
+      borderRadius: 12,
+      padding: 14,
+      alignItems: 'center',
+    },
+    forecastLabel: {
+      fontSize: 12,
+      color: theme.colors.textSecondary,
+      marginBottom: 4,
+    },
+    forecastValue: {
+      fontSize: 15,
+      fontWeight: '700',
+      color: theme.colors.text,
+    },
     detailSection: {
       backgroundColor: theme.colors.card,
       marginHorizontal: 16,
@@ -371,6 +471,56 @@ const createStyles = (theme: ReturnType<typeof useTheme>) =>
       fontSize: 14,
       color: theme.colors.textSecondary,
     },
+    historySection: {
+      margin: 16,
+      backgroundColor: theme.colors.card,
+      borderRadius: 12,
+      padding: 16,
+    },
+    timelineItem: {
+      flexDirection: 'row',
+      minHeight: 48,
+    },
+    timelineLine: {
+      width: 24,
+      alignItems: 'center',
+    },
+    timelineDot: {
+      width: 10,
+      height: 10,
+      borderRadius: 5,
+      backgroundColor: theme.colors.primary,
+      marginTop: 4,
+    },
+    timelineConnector: {
+      width: 2,
+      flex: 1,
+      backgroundColor: theme.colors.border,
+      marginVertical: 2,
+    },
+    timelineContent: {
+      flex: 1,
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'flex-start',
+      paddingBottom: 16,
+      marginLeft: 8,
+    },
+    timelineDate: {
+      fontSize: 14,
+      color: theme.colors.textSecondary,
+    },
+    timelinePrice: {
+      fontSize: 15,
+      fontWeight: '600',
+      color: theme.colors.text,
+    },
+    historyMore: {
+      fontSize: 13,
+      color: theme.colors.textSecondary,
+      textAlign: 'center',
+      marginTop: 12,
+    },
     actions: {
       padding: 16,
       gap: 12,
@@ -382,6 +532,11 @@ const createStyles = (theme: ReturnType<typeof useTheme>) =>
       padding: 16,
       borderRadius: 12,
       gap: 8,
+    },
+    editButton: {
+      backgroundColor: theme.colors.card,
+      borderWidth: 1,
+      borderColor: theme.colors.primary,
     },
     toggleButton: {
       backgroundColor: theme.colors.card,
@@ -396,43 +551,5 @@ const createStyles = (theme: ReturnType<typeof useTheme>) =>
     actionButtonText: {
       fontSize: 16,
       fontWeight: '600',
-    },
-    historySection: {
-      margin: 16,
-      backgroundColor: theme.colors.card,
-      borderRadius: 12,
-      padding: 16,
-    },
-    sectionTitle: {
-      fontSize: 16,
-      fontWeight: '600',
-      color: theme.colors.text,
-      marginBottom: 12,
-    },
-    historyItem: {
-      flexDirection: 'row',
-      justifyContent: 'space-between',
-      alignItems: 'center',
-      paddingVertical: 10,
-      borderBottomWidth: 1,
-      borderBottomColor: theme.colors.border,
-    },
-    historyDate: {
-      flex: 1,
-    },
-    historyDateText: {
-      fontSize: 14,
-      color: theme.colors.textSecondary,
-    },
-    historyPrice: {
-      fontSize: 15,
-      fontWeight: '600',
-      color: theme.colors.text,
-    },
-    historyMore: {
-      fontSize: 13,
-      color: theme.colors.textSecondary,
-      textAlign: 'center',
-      marginTop: 12,
     },
   });

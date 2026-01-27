@@ -11,9 +11,11 @@ import DashboardScreen from '../screens/home/DashboardScreen';
 import SubscriptionListScreen from '../screens/subscriptions/SubscriptionListScreen';
 import SubscriptionDetailScreen from '../screens/subscriptions/SubscriptionDetailScreen';
 import AddSubscriptionScreen from '../screens/subscriptions/AddSubscriptionScreen';
+import EditSubscriptionScreen from '../screens/subscriptions/EditSubscriptionScreen';
 import SettingsScreen from '../screens/settings/SettingsScreen';
 import ScanEmailScreen from '../screens/scan/ScanEmailScreen';
 import PaymentHistoryScreen from '../screens/history/PaymentHistoryScreen';
+import InsightsScreen from '../screens/insights/InsightsScreen';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 const Tab = createBottomTabNavigator<MainTabParamList>();
@@ -53,6 +55,16 @@ function MainTabs() {
           title: 'サブスク',
           tabBarIcon: ({ color, size }) => (
             <Icon name="format-list-bulleted" color={color} size={size} />
+          ),
+        }}
+      />
+      <Tab.Screen
+        name="Insights"
+        component={InsightsScreen}
+        options={{
+          title: 'インサイト',
+          tabBarIcon: ({ color, size }) => (
+            <Icon name="lightbulb-outline" color={color} size={size} />
           ),
         }}
       />
@@ -131,6 +143,11 @@ export default function Navigator() {
           name="AddSubscription"
           component={AddSubscriptionScreen}
           options={{ title: 'サブスク追加' }}
+        />
+        <Stack.Screen
+          name="EditSubscription"
+          component={EditSubscriptionScreen}
+          options={{ title: 'サブスク編集' }}
         />
         <Stack.Screen
           name="ScanEmail"

@@ -20,11 +20,13 @@ interface PaymentWithService extends PaymentRecord {
 }
 
 type ViewMode = 'allTime' | 'byMonth' | 'byService';
+type SortMode = 'date' | 'price';
 
 export default function PaymentHistoryScreen() {
   const theme = useTheme();
   const { subscriptions } = useSubscriptionStore();
   const [viewMode, setViewMode] = useState<ViewMode>('allTime');
+  const [sortMode, setSortMode] = useState<SortMode>('date');
 
   // 全サブスクの支払い履歴を結合
   const allPayments = useMemo(() => {
@@ -103,11 +105,15 @@ export default function PaymentHistoryScreen() {
         label: name,
         items: Array.from(data.items.entries()).map(([itemName, payments]) => ({
           itemName,
-          payments: payments.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()),
+          payments: payments.sort((a, b) =>
+            sortMode === 'price'
+              ? (b.currency === 'USD' ? b.price * 150 : b.price) - (a.currency === 'USD' ? a.price * 150 : a.price)
+              : new Date(b.date).getTime() - new Date(a.date).getTime()
+          ),
         })),
         total: data.total,
       }));
-  }, [allPayments]);
+  }, [allPayments, sortMode]);
 
   // 全期間のサービス別合計
   const allTimeData = useMemo(() => {
@@ -196,6 +202,26 @@ export default function PaymentHistoryScreen() {
         </TouchableOpacity>
       </View>
 
+      {/* ソート切り替え */}
+      <View style={styles.sortContainer}>
+        <TouchableOpacity
+          style={[styles.sortButton, sortMode === 'date' && styles.sortButtonActive]}
+          onPress={() => setSortMode('date')}
+        >
+          <Text style={[styles.sortButtonText, sortMode === 'date' && styles.sortButtonTextActive]}>
+            日付順
+          </Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.sortButton, sortMode === 'price' && styles.sortButtonActive]}
+          onPress={() => setSortMode('price')}
+        >
+          <Text style={[styles.sortButtonText, sortMode === 'price' && styles.sortButtonTextActive]}>
+            価格順
+          </Text>
+        </TouchableOpacity>
+      </View>
+
       {/* リスト */}
       <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
         {viewMode === 'allTime' ? (
@@ -232,7 +258,11 @@ export default function PaymentHistoryScreen() {
                 </Text>
               </View>
               <View style={styles.itemsContainer}>
-                {section.payments.map((payment, index) => (
+                {[...section.payments].sort((a, b) =>
+                sortMode === 'price'
+                  ? (b.currency === 'USD' ? b.price * 150 : b.price) - (a.currency === 'USD' ? a.price * 150 : a.price)
+                  : 0
+              ).map((payment, index) => (
                   <View
                     key={`${payment.serviceId}-${payment.date}-${index}`}
                     style={[
@@ -378,6 +408,29 @@ const createStyles = (theme: ReturnType<typeof useTheme>) =>
       color: theme.colors.textSecondary,
     },
     tabTextActive: {
+      color: '#FFFFFF',
+    },
+    sortContainer: {
+      flexDirection: 'row',
+      marginHorizontal: 16,
+      marginBottom: 12,
+      gap: 8,
+    },
+    sortButton: {
+      paddingHorizontal: 12,
+      paddingVertical: 6,
+      borderRadius: 8,
+      backgroundColor: theme.colors.card,
+    },
+    sortButtonActive: {
+      backgroundColor: theme.colors.primary,
+    },
+    sortButtonText: {
+      fontSize: 13,
+      fontWeight: '600',
+      color: theme.colors.textSecondary,
+    },
+    sortButtonTextActive: {
       color: '#FFFFFF',
     },
     scrollView: {

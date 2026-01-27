@@ -80,6 +80,7 @@ export interface AppSettings {
   theme: 'light' | 'dark' | 'system';
   currency: string;
   language: string;
+  monthlyBudget?: number;
 }
 
 export type RootStackParamList = {
@@ -94,6 +95,7 @@ export type RootStackParamList = {
 export type MainTabParamList = {
   Dashboard: undefined;
   Subscriptions: undefined;
+  Insights: undefined;
   PaymentHistory: undefined;
   Settings: undefined;
 };

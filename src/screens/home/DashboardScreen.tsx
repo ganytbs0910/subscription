@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useCallback } from 'react';
 import {
   View,
   Text,
@@ -6,6 +6,7 @@ import {
   ScrollView,
   TouchableOpacity,
   Dimensions,
+  RefreshControl,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -19,8 +20,13 @@ import {
   formatPrice,
   getUpcomingSubscriptions,
   getDaysUntilNextBilling,
+  compareWithLastMonth,
+  calculateMonthlyPaymentHistory,
+  calculateSavedAmount,
 } from '../../utils/calculations';
 import { getCategoryLabel } from '../../utils/presets';
+import MonthlyBarChart from '../../components/MonthlyBarChart';
+import CategoryBreakdown from '../../components/CategoryBreakdown';
 import type { RootStackParamList } from '../../types';
 
 type NavigationProp = NativeStackNavigationProp<RootStackParamList>;
@@ -31,11 +37,31 @@ export default function DashboardScreen() {
   const theme = useTheme();
   const navigation = useNavigation<NavigationProp>();
   const { subscriptions, settings } = useSubscriptionStore();
+  const [refreshing, setRefreshing] = useState(false);
+
+  const onRefresh = useCallback(() => {
+    setRefreshing(true);
+    setTimeout(() => setRefreshing(false), 500);
+  }, []);
 
   const activeSubscriptions = subscriptions.filter((sub) => sub.isActive);
   const monthlyTotal = calculateTotalMonthly(activeSubscriptions);
   const yearlyTotal = calculateTotalYearly(activeSubscriptions);
   const upcomingPayments = getUpcomingSubscriptions(activeSubscriptions, 14);
+
+  // 前月比トレンド
+  const trend = compareWithLastMonth(subscriptions);
+
+  // 月別支出データ
+  const monthlyHistory = calculateMonthlyPaymentHistory(subscriptions, 6);
+
+  // 節約額
+  const savedAmount = calculateSavedAmount(subscriptions);
+
+  // 予算
+  const budget = settings.monthlyBudget;
+  const budgetPercent = budget && budget > 0 ? (monthlyTotal / budget) * 100 : 0;
+  const overBudget = budgetPercent > 100;
 
   // 支払い履歴の件数を取得
   const totalPaymentRecords = subscriptions.reduce((sum, sub) => {
@@ -45,13 +71,37 @@ export default function DashboardScreen() {
   const styles = createStyles(theme);
 
   return (
-    <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
+    <ScrollView
+      style={styles.container}
+      showsVerticalScrollIndicator={false}
+      refreshControl={
+        <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+      }
+    >
       {/* メインカード - 月額合計 */}
       <View style={styles.mainCard}>
         <Text style={styles.mainCardLabel}>今月の支払い</Text>
         <Text style={styles.mainCardAmount}>
           {formatPrice(monthlyTotal, settings.currency)}
         </Text>
+        {/* 前月比トレンド */}
+        {(trend.lastMonth > 0 || trend.thisMonth > 0) && (
+          <View style={styles.trendRow}>
+            <Icon
+              name={trend.difference >= 0 ? 'arrow-up' : 'arrow-down'}
+              size={14}
+              color={trend.difference >= 0 ? '#FF8A80' : '#B9F6CA'}
+            />
+            <Text
+              style={[
+                styles.trendText,
+                { color: trend.difference >= 0 ? '#FF8A80' : '#B9F6CA' },
+              ]}
+            >
+              {Math.abs(Math.round(trend.percentChange))}% 前月比
+            </Text>
+          </View>
+        )}
         <View style={styles.mainCardDivider} />
         <View style={styles.mainCardRow}>
           <View style={styles.mainCardStat}>
@@ -67,6 +117,36 @@ export default function DashboardScreen() {
           </View>
         </View>
       </View>
+
+      {/* 予算プログレスバー */}
+      {budget && budget > 0 && (
+        <View style={styles.section}>
+          <View style={styles.budgetCard}>
+            <View style={styles.budgetHeader}>
+              <Text style={styles.budgetLabel}>月間予算</Text>
+              <Text style={[styles.budgetValue, overBudget && { color: '#D32F2F' }]}>
+                {formatPrice(monthlyTotal, settings.currency)} / {formatPrice(budget, settings.currency)}
+              </Text>
+            </View>
+            <View style={styles.budgetTrack}>
+              <View
+                style={[
+                  styles.budgetBar,
+                  {
+                    width: `${Math.min(budgetPercent, 100)}%`,
+                    backgroundColor: overBudget ? '#D32F2F' : theme.colors.primary,
+                  },
+                ]}
+              />
+            </View>
+            {overBudget && (
+              <Text style={styles.budgetWarning}>
+                予算を{formatPrice(monthlyTotal - budget, settings.currency)}超過しています
+              </Text>
+            )}
+          </View>
+        </View>
+      )}
 
       {/* クイックアクション */}
       <View style={styles.quickActions}>
@@ -100,6 +180,38 @@ export default function DashboardScreen() {
           <Text style={styles.quickActionText}>支払い{'\n'}履歴</Text>
         </TouchableOpacity>
       </View>
+
+      {/* 節約額カード */}
+      {savedAmount > 0 && (
+        <View style={styles.section}>
+          <View style={styles.savingsCard}>
+            <Icon name="piggy-bank" size={24} color="#388E3C" />
+            <View style={styles.savingsInfo}>
+              <Text style={styles.savingsLabel}>解約で節約中</Text>
+              <Text style={styles.savingsAmount}>
+                {formatPrice(savedAmount, settings.currency)}/月
+              </Text>
+            </View>
+          </View>
+        </View>
+      )}
+
+      {/* 月別支出バーチャート */}
+      {monthlyHistory.some((m) => m.total > 0) && (
+        <View style={styles.section}>
+          <MonthlyBarChart data={monthlyHistory} currency={settings.currency} />
+        </View>
+      )}
+
+      {/* カテゴリ別内訳 */}
+      {activeSubscriptions.length > 0 && (
+        <View style={styles.section}>
+          <CategoryBreakdown
+            subscriptions={subscriptions}
+            currency={settings.currency}
+          />
+        </View>
+      )}
 
       {/* 次回請求予定 */}
       <View style={styles.section}>
@@ -260,6 +372,16 @@ const createStyles = (theme: ReturnType<typeof useTheme>) =>
       fontWeight: '700',
       color: '#FFFFFF',
     },
+    trendRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      marginTop: 6,
+      gap: 4,
+    },
+    trendText: {
+      fontSize: 13,
+      fontWeight: '600',
+    },
     mainCardDivider: {
       height: 1,
       backgroundColor: 'rgba(255,255,255,0.2)',
@@ -288,6 +410,42 @@ const createStyles = (theme: ReturnType<typeof useTheme>) =>
       color: 'rgba(255,255,255,0.7)',
       marginTop: 2,
     },
+    budgetCard: {
+      backgroundColor: theme.colors.card,
+      borderRadius: 14,
+      padding: 16,
+    },
+    budgetHeader: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      marginBottom: 10,
+    },
+    budgetLabel: {
+      fontSize: 14,
+      fontWeight: '600',
+      color: theme.colors.text,
+    },
+    budgetValue: {
+      fontSize: 14,
+      fontWeight: '600',
+      color: theme.colors.textSecondary,
+    },
+    budgetTrack: {
+      height: 8,
+      backgroundColor: theme.colors.border,
+      borderRadius: 4,
+      overflow: 'hidden',
+    },
+    budgetBar: {
+      height: '100%',
+      borderRadius: 4,
+    },
+    budgetWarning: {
+      fontSize: 12,
+      color: '#D32F2F',
+      marginTop: 6,
+    },
     quickActions: {
       flexDirection: 'row',
       paddingHorizontal: 16,
@@ -315,6 +473,27 @@ const createStyles = (theme: ReturnType<typeof useTheme>) =>
       color: theme.colors.text,
       textAlign: 'center',
       lineHeight: 16,
+    },
+    savingsCard: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      backgroundColor: '#E8F5E9',
+      borderRadius: 14,
+      padding: 16,
+      gap: 12,
+    },
+    savingsInfo: {
+      flex: 1,
+    },
+    savingsLabel: {
+      fontSize: 13,
+      color: '#2E7D32',
+    },
+    savingsAmount: {
+      fontSize: 18,
+      fontWeight: '700',
+      color: '#1B5E20',
+      marginTop: 2,
     },
     section: {
       paddingHorizontal: 16,
