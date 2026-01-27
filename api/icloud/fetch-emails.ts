@@ -279,9 +279,140 @@ interface ApplePurchase {
 function extractApplePurchases(subject: string, body: string): ApplePurchase[] {
   const purchases: ApplePurchase[] = [];
 
+  // ★ 方法0: HTML変換後の1行テキスト形式をパース
+  // フォーマット例:
+  // "ARK: Ultimate Mobile Edition ARK Pass - Monthly (月額) 更新：2026年2月2日 問題を報告する ¥700"
+  // "ブロスタ BRAWL PASS PLUS UPGRADE アプリ内課金 大にっし〜 問題を報告する ¥800"
+
+  // まず、JCT税額情報を除去して処理しやすくする
+  const cleanedBody = body.replace(/JCT[（\(]\s*\d+%?\s*[）\)][をが]含む\s*[¥￥][\d,]+/g, '');
+
+  // 「問題を報告する ¥金額」の前にあるアプリ情報を抽出
+  const reportPattern = /(?:App\s*Store\s+)?([A-Za-z\u3040-\u9FFF][^問]+?)\s+問題を報告する\s*[¥￥]\s*([\d,]+)/g;
+  let match;
+
+  while ((match = reportPattern.exec(cleanedBody)) !== null) {
+    const beforeReport = match[1].trim();
+    const price = parseInt(match[2].replace(/,/g, ''), 10);
+
+    if (price < 50 || price > 100000) continue;
+
+    // ゴミデータを除外（メールのフッター等が誤認識された場合）
+    if (beforeReport.includes('での購入時に使用する') ||
+        beforeReport.includes('パスワード設定を管理') ||
+        beforeReport.includes('Apple Account') ||
+        beforeReport.includes('プライバシーを尊重') ||
+        beforeReport.includes('Apple サポート') ||
+        beforeReport.includes('領収書を管理') ||
+        beforeReport.length > 200) {
+      continue;
+    }
+
+    // beforeReportを解析: "アプリ名 アイテム名 (月額) 更新：日付" または "アプリ名 アイテム名 アプリ内課金 ユーザー名"
+    let appName: string | null = null;
+    let itemName: string | null = null;
+    let purchaseType: 'subscription' | 'in_app_purchase' | 'purchase' = 'purchase';
+    let billingCycle: BillingCycle | undefined;
+
+    // サブスクリプション判定
+    if (/\(月額\)|（月額）|更新：/.test(beforeReport)) {
+      purchaseType = 'subscription';
+      billingCycle = 'monthly';
+    }
+    if (/\(年額\)|（年額）/.test(beforeReport)) {
+      purchaseType = 'subscription';
+      billingCycle = 'yearly';
+    }
+    if (/アプリ内課金|App\s*内課金/.test(beforeReport)) {
+      purchaseType = 'in_app_purchase';
+    }
+
+    // アプリ名とアイテム名を抽出
+    // "App Store" の後からアプリ名が始まる
+    let content = beforeReport.replace(/^.*?App\s*Store\s*/, '');
+
+    // 更新日以降を除去
+    content = content.replace(/\s*更新：.*$/, '');
+    // アプリ内課金以降を除去
+    content = content.replace(/\s*(?:アプリ内課金|App\s*内課金).*$/, '');
+    // (月額)(年額)を除去
+    content = content.replace(/\s*[（\(](?:月額|年額)[）\)].*$/, '');
+
+    // 残りからアプリ名とアイテム名を分離
+    // パターン: "ARK: Ultimate Mobile Edition ARK Pass - Monthly"
+    // 多くの場合、アイテム名は大文字英語や特定のキーワードを含む
+    const parts = content.trim();
+
+    // 既知のアプリ名パターンで分割を試みる
+    const knownApps = [
+      /^(ARK:\s*Ultimate Mobile Edition)\s+(.+)$/i,
+      /^(ブロスタ)\s+(.+)$/i,
+      /^(クラッシュ・ロワイヤル)\s+(.+)$/i,
+      /^(クラッシュ・オブ・クラン)\s+(.+)$/i,
+      /^(Tinder)\s+(.+)$/i,
+      /^(YouTube)\s+(.+)$/i,
+      /^(LINE)\s+(.+)$/i,
+      /^(Spotify)\s+(.+)$/i,
+      /^(Netflix)\s+(.+)$/i,
+    ];
+
+    let matched = false;
+    for (const pattern of knownApps) {
+      const appMatch = parts.match(pattern);
+      if (appMatch) {
+        appName = appMatch[1];
+        itemName = appMatch[2];
+        matched = true;
+        break;
+      }
+    }
+
+    // 既知のパターンにマッチしない場合、一般的なルールで分割
+    if (!matched && parts.length > 0) {
+      // 大文字英語が多い部分をアイテム名と仮定
+      const itemMatch = parts.match(/^(.+?)\s+([A-Z][A-Z0-9\s\-]+(?:Pass|Premium|Plus|Pro|Coin|パック|UPGRADE).*)$/i);
+      if (itemMatch) {
+        appName = itemMatch[1].trim();
+        itemName = itemMatch[2].trim();
+      } else {
+        // 分割できない場合は全体をアプリ名とする
+        appName = parts;
+      }
+    }
+
+    if (appName) {
+      // 重複チェック
+      const isDuplicate = purchases.some(p => p.name === appName && p.price === price);
+      if (!isDuplicate) {
+        let category: Category = 'gaming';
+        if (/YouTube|Netflix|Disney|Hulu|Prime|ARK/i.test(appName)) category = 'streaming';
+        if (/Spotify|Music|AWA/i.test(appName)) category = 'music';
+        if (/iCloud|Dropbox|Google/i.test(appName)) category = 'cloud';
+        if (/Twitter|X\s/i.test(appName)) category = 'other';
+        if (/Tinder|マッチング/i.test(appName)) category = 'other';
+
+        console.log(`[APPLE PARSE HTML] Found: ${appName} - ${itemName} - ¥${price} (${purchaseType})`);
+        purchases.push({
+          name: appName,
+          item: itemName,
+          category,
+          price,
+          currency: 'JPY',
+          purchaseType,
+          billingCycle,
+        });
+      }
+    }
+  }
+
+  // 方法0で見つかった場合は終了
+  if (purchases.length > 0) {
+    console.log(`[APPLE PARSE] Total from HTML format: ${purchases.length}`);
+    return purchases;
+  }
+
   // 1. 有効期限通知: 「サービス名（期間）¥金額／月」
   const expirationPattern = /([A-Za-z][A-Za-z0-9\s\-]+?)(?:（|[\(])(\d+か?[月年週])(?:）|[\)])\s*[¥￥]\s*([\d,]+)[／\/]([月年週])/g;
-  let match;
   while ((match = expirationPattern.exec(body)) !== null) {
     const serviceName = match[1].trim();
     const period = match[2];
@@ -484,8 +615,11 @@ function matchService(fromAddress: string, subject: string, body: string): Match
   const fullText = `${subject} ${body}`;
 
   // ★ Apple領収書を最優先で処理（個別のアプリ課金を抽出するため）
-  const isAppleEmail = /@(apple\.com|itunes\.com|email\.apple\.com)/i.test(fromLower) || /no_reply@.*apple/i.test(fromLower);
-  const isAppleReceipt = /領収書|receipt/i.test(subject);
+  const isAppleEmail = /@(apple\.com|itunes\.com|email\.apple\.com)/i.test(fromLower) ||
+                       /no_reply@.*apple/i.test(fromLower) ||
+                       /noreply@.*apple/i.test(fromLower);
+  // Apple領収書の件名パターン: "Apple からの領収書です", "Your receipt from Apple", etc.
+  const isAppleReceipt = /領収書|receipt|ご注文|your order/i.test(subject);
 
   if (isAppleEmail && isAppleReceipt) {
     const purchases = extractApplePurchases(subject, fullText);
@@ -752,8 +886,11 @@ async function fetchEmails(email: string, appPassword: string, _maxResults: numb
   const emailContents = new Map<string, { content: string; isBilling: boolean }>();
   let totalScanned = 0;
 
-  // INBOXのみスキャン（高速化）
-  const foldersToScan = ['INBOX'];
+  // 主要フォルダのみスキャン（タイムアウト防止のため最小限に）
+  const foldersToScan = [
+    'INBOX',
+    'Deleted Messages',  // 削除済みにも領収書がある可能性
+  ];
 
   for (const folderName of foldersToScan) {
     let lock;
@@ -773,32 +910,9 @@ async function fetchEmails(email: string, appPassword: string, _maxResults: numb
 
       console.log(`\n[SCAN] Folder: ${folderName} (${mailbox.exists} emails)`);
 
-      // 高速化: 重要な送信者のみに絞って検索
+      // 件名に「領収書」を含むメールのみ検索（Apple領収書を確実に取得）
       const matchingUids = new Set<number>();
 
-      // 優先度の高い送信者（Apple, Netflix, Spotify等の主要サービス）
-      const prioritySenders = [
-        'no_reply@email.apple.com',  // Apple領収書
-        'appleid@id.apple.com',
-        'info@mailer.netflix.com',
-        'no-reply@spotify.com',
-        'noreply@youtube.com',
-        'payments-noreply@google.com',
-      ];
-
-      for (const sender of prioritySenders) {
-        try {
-          const result = await client.search({ from: sender }, { uid: true });
-          if (result && Array.isArray(result) && result.length > 0) {
-            result.forEach(uid => matchingUids.add(uid));
-            console.log(`  [SEARCH] ${sender}: ${result.length} emails`);
-          }
-        } catch (e) {
-          // 検索エラーは無視
-        }
-      }
-
-      // 件名で領収書を検索（高速）
       try {
         const result = await client.search({ subject: '領収書' }, { uid: true });
         if (result && Array.isArray(result) && result.length > 0) {
@@ -814,8 +928,9 @@ async function fetchEmails(email: string, appPassword: string, _maxResults: numb
         continue;
       }
 
-      // マッチしたメールを処理
-      const uidArray = Array.from(matchingUids);
+      // マッチしたメールを処理（全件処理、領収書は少数なので問題なし）
+      const uidArray = Array.from(matchingUids).sort((a, b) => b - a);
+      console.log(`  [PROCESS] Processing ${uidArray.length} emails`);
       const uidRanges = uidArray.join(',');
 
       for await (const msg of client.fetch(uidRanges, { source: true }, { uid: true })) {
@@ -828,14 +943,15 @@ async function fetchEmails(email: string, appPassword: string, _maxResults: numb
         const fromText = parsed.from?.text || '';
         const body = parsed.text || '';
         const htmlBody = parsed.html || '';
-        const fullText = `${subject} ${body} ${htmlBody}`;
+        // HTMLをテキストに変換して結合（2025年以降のメールはHTMLのみの場合がある）
+        const htmlText = stripHtml(htmlBody);
+        const fullText = `${subject} ${body} ${htmlText}`;
         const emailDate = parsed.date || new Date();
 
         const matchResults = matchService(fromAddress, subject, fullText);
         if (!matchResults) continue;
 
         const isBilling = isBillingEmail(subject, fullText);
-        const htmlText = stripHtml(htmlBody);
         const currentContent = `Subject: ${subject}\nFrom: ${fromText}\n\n--- Plain Text ---\n${body}\n\n--- HTML Content ---\n${htmlText}`;
 
         for (const matchResult of matchResults) {
