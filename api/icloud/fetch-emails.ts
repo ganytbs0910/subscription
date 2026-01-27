@@ -43,6 +43,8 @@ interface SubItem {
   totalPaid: number;      // このアイテムの累計
 }
 
+type DetectionType = 'subscription' | 'payment';
+
 interface DetectedSubscription {
   name: string;
   category: Category;
@@ -60,6 +62,7 @@ interface DetectedSubscription {
   totalPaid: number;
   paymentCount: number;
   subItems?: SubItem[];   // アイテム別内訳
+  type: DetectionType;    // サブスク or 単発課金
 }
 
 interface ServicePattern {
@@ -229,17 +232,12 @@ function isBillingEmail(subject: string, body: string): boolean {
   return BILLING_SUBJECT_KEYWORDS.some(pattern => pattern.test(subject));
 }
 
-// 金額を抽出
+// 金額を抽出（日本円として扱う）
 function extractPrice(text: string): { price: number; currency: string } | null {
   const MIN_JPY = 50, MAX_JPY = 500000;
-  const MIN_USD = 0.5, MAX_USD = 500;
 
-  // JPYパターンを必ず先にチェック（iCloudユーザーは日本が多い）
-  const jpyPatterns = PRICE_PATTERNS.filter(p => p.currency === 'JPY');
-  const otherPatterns = PRICE_PATTERNS.filter(p => p.currency !== 'JPY');
-  const orderedPatterns = [...jpyPatterns, ...otherPatterns];
-
-  for (const { pattern, currency } of orderedPatterns) {
+  // すべてのパターンから金額を抽出し、JPYとして返す
+  for (const { pattern } of PRICE_PATTERNS) {
     const matches = text.match(new RegExp(pattern.source, 'gi'));
     if (matches) {
       for (const matchStr of matches) {
@@ -247,16 +245,10 @@ function extractPrice(text: string): { price: number; currency: string } | null 
         if (match) {
           const price = parseFloat(match[1].replace(/,/g, ''));
 
-          if (currency === 'JPY' && price >= MIN_JPY && price <= MAX_JPY) return { price, currency };
-
-          // USDの場合、$100超で¥として妥当な範囲なら¥に変換
-          // （例: $1680 → ¥1680）
-          if (currency === 'USD' && price > 100 && price >= MIN_JPY && price <= MAX_JPY) {
-            return { price, currency: 'JPY' };
+          // 妥当な日本円の範囲内であればJPYとして返す
+          if (price >= MIN_JPY && price <= MAX_JPY) {
+            return { price: Math.round(price), currency: 'JPY' };
           }
-
-          if (currency === 'USD' && price >= MIN_USD && price <= MAX_USD) return { price, currency };
-          if (currency === 'EUR' && price >= MIN_USD && price <= MAX_USD) return { price, currency };
         }
       }
     }
@@ -754,8 +746,9 @@ async function fetchEmails(email: string, appPassword: string, _maxResults: numb
 
   await client.connect();
 
-  const detected = new Map<string, Omit<DetectedSubscription, 'paymentHistory' | 'totalPaid' | 'paymentCount'>>();
+  const detected = new Map<string, Omit<DetectedSubscription, 'paymentHistory' | 'totalPaid' | 'paymentCount' | 'subItems'>>();
   const paymentHistories = new Map<string, PaymentRecord[]>();
+  const purchaseTypes = new Map<string, 'subscription' | 'in_app_purchase' | 'purchase'>(); // 課金タイプを追跡
   const emailContents = new Map<string, { content: string; isBilling: boolean }>();
   let totalScanned = 0;
 
@@ -891,6 +884,15 @@ async function fetchEmails(email: string, appPassword: string, _maxResults: numb
             console.log(`[PAYMENT] Added to history: ${service.name} - ${priceInfo.price} ${priceInfo.currency} on ${emailDate.toISOString().split('T')[0]}`);
           }
 
+          // 課金タイプを保存（サブスクリプションを優先）
+          if (purchaseType) {
+            const existingType = purchaseTypes.get(service.name);
+            // サブスクリプションは他のタイプより優先
+            if (!existingType || purchaseType === 'subscription') {
+              purchaseTypes.set(service.name, purchaseType);
+            }
+          }
+
           // メール内容を保存（AI抽出用）
           const existingContent = emailContents.get(service.name);
           if (!existingContent ||
@@ -906,6 +908,10 @@ async function fetchEmails(email: string, appPassword: string, _maxResults: numb
             (isBilling === existing.isBilling && confidence > existing.confidence);
 
           if (shouldUpdate) {
+            // タイプを判定: サブスクリプションか単発課金か
+            const detectedType: DetectionType =
+              purchaseType === 'subscription' || billingCycle ? 'subscription' : 'payment';
+
             detected.set(service.name, {
               name: service.name,
               category: service.category,
@@ -918,6 +924,7 @@ async function fetchEmails(email: string, appPassword: string, _maxResults: numb
               confidence,
               priceDetected: !!(isBilling && priceInfo),
               isBilling,
+              type: detectedType,
             });
           }
         }
@@ -954,6 +961,7 @@ async function fetchEmails(email: string, appPassword: string, _maxResults: numb
     items: Map<string, SubItemPurchase[]>;  // アイテム名 -> 購入履歴
     category: Category;
     currency: string;
+    isSubscription: boolean;  // サブスクリプションかどうか
     billingCycle: BillingCycle | null;
     email: string;
     latestDate: string;
@@ -965,6 +973,10 @@ async function fetchEmails(email: string, appPassword: string, _maxResults: numb
     const itemName = name.includes(' - ') ? name.split(' - ').slice(1).join(' - ') : null;
     const history = paymentHistories.get(name) || [];
 
+    // 課金タイプを取得（サブスクリプションかどうか）
+    const pType = purchaseTypes.get(name);
+    const isSubscription = sub.type === 'subscription' || pType === 'subscription' || !!sub.billingCycle;
+
     if (!appGroups.has(baseName)) {
       appGroups.set(baseName, {
         items: new Map(),
@@ -974,10 +986,16 @@ async function fetchEmails(email: string, appPassword: string, _maxResults: numb
         email: sub.email,
         latestDate: sub.detectedDate,
         paymentHistory: [],
+        isSubscription: isSubscription,
       });
     }
 
     const group = appGroups.get(baseName)!;
+
+    // サブスクリプションが1つでもあれば全体をサブスクとして扱う
+    if (isSubscription) {
+      group.isSubscription = true;
+    }
 
     // アイテム別の購入履歴を追加
     if (itemName && history.length > 0) {
@@ -1039,6 +1057,7 @@ async function fetchEmails(email: string, appPassword: string, _maxResults: numb
       totalPaid,
       paymentCount: group.paymentHistory.length,
       subItems: subItems.length > 0 ? subItems : undefined,
+      type: group.isSubscription ? 'subscription' : 'payment',
     });
   }
 
