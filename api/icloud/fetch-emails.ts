@@ -300,10 +300,14 @@ function extractApplePurchases(subject: string, body: string): ApplePurchase[] {
     // ゴミデータを除外（メールのフッター等が誤認識された場合）
     if (beforeReport.includes('での購入時に使用する') ||
         beforeReport.includes('パスワード設定を管理') ||
-        beforeReport.includes('Apple Account') ||
-        beforeReport.includes('プライバシーを尊重') ||
-        beforeReport.includes('Apple サポート') ||
+        /Apple\s*Account/i.test(beforeReport) ||
+        /プライバシー/.test(beforeReport) ||
+        /Apple\s*サポート/.test(beforeReport) ||
         beforeReport.includes('領収書を管理') ||
+        beforeReport.includes('販売条件') ||
+        /apple\.com/i.test(beforeReport) ||
+        beforeReport.includes('サポートを利用') ||
+        /尊重/.test(beforeReport) ||
         beforeReport.length > 200) {
       continue;
     }
@@ -462,6 +466,8 @@ function extractApplePurchases(subject: string, body: string): ApplePurchase[] {
     /^請求先$/, /^日付/, /^ご注文番号/, /^書類番号/, /^PayPay/i,
     /クレジット/, /^-+$/, /^JCT/, /課税/, /Amex|Visa|JCB|Mastercard/i,
     /^\d{3}-\d{4}/, /^JPN$/, /@.*\.com/, /滋賀県|草津市|栗東市/,
+    /プライバシー/, /尊重/, /販売条件/, /apple\.com/i,
+    /Apple\s*サポート/, /サポートを利用/, /領収書を管理/,
   ];
 
   const isIgnored = (text: string) => ignorePatterns.some(p => p.test(text));
@@ -1077,7 +1083,8 @@ async function fetchEmails(email: string, appPassword: string, _maxResults: numb
     items: Map<string, SubItemPurchase[]>;  // アイテム名 -> 購入履歴
     category: Category;
     currency: string;
-    isSubscription: boolean;  // サブスクリプションかどうか
+    subscriptionCount: number;  // サブスク購入の回数
+    paymentCount: number;       // 単発課金の回数
     billingCycle: BillingCycle | null;
     email: string;
     latestDate: string;
@@ -1102,15 +1109,19 @@ async function fetchEmails(email: string, appPassword: string, _maxResults: numb
         email: sub.email,
         latestDate: sub.detectedDate,
         paymentHistory: [],
-        isSubscription: isSubscription,
+        subscriptionCount: 0,
+        paymentCount: 0,
       });
     }
 
     const group = appGroups.get(baseName)!;
 
-    // サブスクリプションが1つでもあれば全体をサブスクとして扱う
+    // サブスク/課金の回数をカウント
+    const purchaseCount = history.length || 1;
     if (isSubscription) {
-      group.isSubscription = true;
+      group.subscriptionCount += purchaseCount;
+    } else {
+      group.paymentCount += purchaseCount;
     }
 
     // アイテム別の購入履歴を追加
@@ -1173,7 +1184,8 @@ async function fetchEmails(email: string, appPassword: string, _maxResults: numb
       totalPaid,
       paymentCount: group.paymentHistory.length,
       subItems: subItems.length > 0 ? subItems : undefined,
-      type: group.isSubscription ? 'subscription' : 'payment',
+      // サブスクの購入回数が過半数の場合のみサブスクとして扱う
+      type: group.subscriptionCount > group.paymentCount ? 'subscription' : 'payment',
     });
   }
 

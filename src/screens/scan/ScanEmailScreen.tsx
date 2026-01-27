@@ -385,6 +385,37 @@ export default function ScanEmailScreen() {
           totalPaid: item.totalPaid,
         }));
 
+        // サブスクの契約状態を最終支払い日から判定
+        // 月額なら前月〜今月に支払いがあれば契約中、それ以前なら確実に解約済み
+        let isActive = true;
+        if (sub.type === 'subscription' && paymentHistory.length > 0) {
+          const lastPaymentDate = new Date(paymentHistory[0].date); // already sorted newest first
+          const now = new Date();
+          const cycle = sub.billingCycle || 'monthly';
+
+          // 最終支払い月と現在の月の差分（月単位）
+          const monthsDiff =
+            (now.getFullYear() - lastPaymentDate.getFullYear()) * 12 +
+            (now.getMonth() - lastPaymentDate.getMonth());
+
+          if (cycle === 'monthly') {
+            // 月額: 前月(1ヶ月前)以降に支払いがあれば契約中
+            isActive = monthsDiff <= 1;
+          } else if (cycle === 'yearly') {
+            // 年額: 12ヶ月以内に支払いがあれば契約中
+            isActive = monthsDiff <= 12;
+          } else if (cycle === 'quarterly') {
+            // 四半期: 3ヶ月以内に支払いがあれば契約中
+            isActive = monthsDiff <= 3;
+          } else if (cycle === 'weekly') {
+            // 週額: 日数で判定（2週間以内）
+            const daysDiff = Math.floor(
+              (now.getTime() - lastPaymentDate.getTime()) / (1000 * 60 * 60 * 24)
+            );
+            isActive = daysDiff <= 14;
+          }
+        }
+
         const subscriptionData = {
           name: sub.name,
           price: sub.price || 0,
@@ -393,7 +424,7 @@ export default function ScanEmailScreen() {
           category: sub.category,
           nextBillingDate: nextMonth.toISOString(),
           startDate,
-          isActive: true,
+          isActive,
           paymentHistory,
           totalPaidFromEmail: sub.totalPaid,
           subItems,
@@ -687,9 +718,34 @@ export default function ScanEmailScreen() {
                       </Text>
                     )}
                   </View>
-                  <Text style={styles.resultCategory}>
-                    {getCategoryLabel(sub.category)}
-                  </Text>
+                  <View style={styles.resultMeta}>
+                    <Text style={styles.resultCategory}>
+                      {getCategoryLabel(sub.category)}
+                    </Text>
+                    {sub.type === 'subscription' && sub.paymentHistory && sub.paymentHistory.length > 0 && (() => {
+                      const sortedHistory = [...sub.paymentHistory].sort(
+                        (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()
+                      );
+                      const lastDate = new Date(sortedHistory[0].date);
+                      const now = new Date();
+                      const monthsDiff =
+                        (now.getFullYear() - lastDate.getFullYear()) * 12 +
+                        (now.getMonth() - lastDate.getMonth());
+                      const cycle = sub.billingCycle || 'monthly';
+                      const active =
+                        cycle === 'monthly' ? monthsDiff <= 1 :
+                        cycle === 'yearly' ? monthsDiff <= 12 :
+                        cycle === 'quarterly' ? monthsDiff <= 3 :
+                        Math.floor((now.getTime() - lastDate.getTime()) / 86400000) <= 14;
+                      return (
+                        <View style={[styles.statusBadge, { backgroundColor: active ? '#34C75920' : '#FF3B3020' }]}>
+                          <Text style={[styles.statusBadgeText, { color: active ? '#34C759' : '#FF3B30' }]}>
+                            {active ? '契約中' : '解約済み'}
+                          </Text>
+                        </View>
+                      );
+                    })()}
+                  </View>
                   {/* サブアイテム（内訳）を表示 */}
                   {sub.subItems && sub.subItems.length > 0 && (
                     <View style={styles.subItemsContainer}>
@@ -976,10 +1032,24 @@ const createStyles = (theme: ReturnType<typeof useTheme>) =>
       fontSize: 11,
       fontWeight: '600',
     },
+    resultMeta: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      marginTop: 2,
+      gap: 8,
+    },
     resultCategory: {
       fontSize: 13,
       color: theme.colors.textSecondary,
-      marginTop: 2,
+    },
+    statusBadge: {
+      paddingHorizontal: 6,
+      paddingVertical: 2,
+      borderRadius: 4,
+    },
+    statusBadgeText: {
+      fontSize: 11,
+      fontWeight: '600',
     },
     subItemsContainer: {
       marginTop: 8,

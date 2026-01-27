@@ -19,12 +19,12 @@ interface PaymentWithService extends PaymentRecord {
   itemName?: string;
 }
 
-type ViewMode = 'byMonth' | 'byService';
+type ViewMode = 'allTime' | 'byMonth' | 'byService';
 
 export default function PaymentHistoryScreen() {
   const theme = useTheme();
   const { subscriptions } = useSubscriptionStore();
-  const [viewMode, setViewMode] = useState<ViewMode>('byMonth');
+  const [viewMode, setViewMode] = useState<ViewMode>('allTime');
 
   // 全サブスクの支払い履歴を結合
   const allPayments = useMemo(() => {
@@ -109,6 +109,29 @@ export default function PaymentHistoryScreen() {
       }));
   }, [allPayments]);
 
+  // 全期間のサービス別合計
+  const allTimeData = useMemo(() => {
+    const serviceMap = new Map<string, { total: number; count: number }>();
+
+    allPayments.forEach(payment => {
+      const price = payment.currency === 'USD' ? payment.price * 150 : payment.price;
+      if (!serviceMap.has(payment.serviceName)) {
+        serviceMap.set(payment.serviceName, { total: 0, count: 0 });
+      }
+      const data = serviceMap.get(payment.serviceName)!;
+      data.total += price;
+      data.count++;
+    });
+
+    return Array.from(serviceMap.entries())
+      .sort((a, b) => b[1].total - a[1].total)
+      .map(([name, data]) => ({
+        name,
+        total: data.total,
+        count: data.count,
+      }));
+  }, [allPayments]);
+
   const totalAllTime = useMemo(() => {
     return allPayments.reduce((sum, p) => {
       return sum + (p.currency === 'USD' ? p.price * 150 : p.price);
@@ -148,14 +171,17 @@ export default function PaymentHistoryScreen() {
       {/* 切り替えタブ */}
       <View style={styles.tabContainer}>
         <TouchableOpacity
+          style={[styles.tab, viewMode === 'allTime' && styles.tabActive]}
+          onPress={() => setViewMode('allTime')}
+        >
+          <Text style={[styles.tabText, viewMode === 'allTime' && styles.tabTextActive]}>
+            全期間
+          </Text>
+        </TouchableOpacity>
+        <TouchableOpacity
           style={[styles.tab, viewMode === 'byMonth' && styles.tabActive]}
           onPress={() => setViewMode('byMonth')}
         >
-          <Icon
-            name="calendar-month"
-            size={18}
-            color={viewMode === 'byMonth' ? '#FFFFFF' : theme.colors.textSecondary}
-          />
           <Text style={[styles.tabText, viewMode === 'byMonth' && styles.tabTextActive]}>
             月別
           </Text>
@@ -164,11 +190,6 @@ export default function PaymentHistoryScreen() {
           style={[styles.tab, viewMode === 'byService' && styles.tabActive]}
           onPress={() => setViewMode('byService')}
         >
-          <Icon
-            name="apps"
-            size={18}
-            color={viewMode === 'byService' ? '#FFFFFF' : theme.colors.textSecondary}
-          />
           <Text style={[styles.tabText, viewMode === 'byService' && styles.tabTextActive]}>
             サービス別
           </Text>
@@ -177,7 +198,30 @@ export default function PaymentHistoryScreen() {
 
       {/* リスト */}
       <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
-        {viewMode === 'byMonth' ? (
+        {viewMode === 'allTime' ? (
+          // 全期間表示（サービス別の累計ランキング）
+          <View style={styles.section}>
+            <View style={styles.itemsContainer}>
+              {allTimeData.map((service, index) => (
+                <View
+                  key={service.name}
+                  style={[
+                    styles.paymentItem,
+                    index === allTimeData.length - 1 && styles.paymentItemLast,
+                  ]}
+                >
+                  <View style={styles.paymentLeft}>
+                    <Text style={styles.paymentService}>{service.name}</Text>
+                    <Text style={styles.paymentDate}>{service.count}回</Text>
+                  </View>
+                  <Text style={styles.paymentPrice}>
+                    {formatPrice(service.total, 'JPY')}
+                  </Text>
+                </View>
+              ))}
+            </View>
+          </View>
+        ) : viewMode === 'byMonth' ? (
           // 月別表示
           monthlyData.map((section) => (
             <View key={section.key} style={styles.section}>
