@@ -740,7 +740,7 @@ export default function ScanEmailScreen() {
                       return (
                         <View style={[styles.statusBadge, { backgroundColor: active ? '#34C75920' : '#FF3B3020' }]}>
                           <Text style={[styles.statusBadgeText, { color: active ? '#34C759' : '#FF3B30' }]}>
-                            {active ? '契約中' : '解約済み'}
+                            {active ? '有効の可能性' : '解約済み'}
                           </Text>
                         </View>
                       );

@@ -19,17 +19,30 @@ import type { RootStackParamList, Subscription } from '../../types';
 
 type NavigationProp = NativeStackNavigationProp<RootStackParamList>;
 type ViewMode = 'list' | 'category';
+type FilterMode = 'all' | 'active' | 'cancelled';
 
 export default function SubscriptionListScreen() {
   const theme = useTheme();
   const navigation = useNavigation<NavigationProp>();
   const { subscriptions, settings } = useSubscriptionStore();
   const [viewMode, setViewMode] = useState<ViewMode>('list');
+  const [filterMode, setFilterMode] = useState<FilterMode>('all');
 
   const activeCount = useMemo(() =>
     subscriptions.filter(s => s.isActive).length,
     [subscriptions]
   );
+
+  const cancelledCount = useMemo(() =>
+    subscriptions.filter(s => !s.isActive).length,
+    [subscriptions]
+  );
+
+  const filteredSubscriptions = useMemo(() => {
+    if (filterMode === 'active') return subscriptions.filter(s => s.isActive);
+    if (filterMode === 'cancelled') return subscriptions.filter(s => !s.isActive);
+    return subscriptions;
+  }, [subscriptions, filterMode]);
 
   const monthlyTotal = useMemo(() =>
     calculateTotalMonthly(subscriptions.filter(s => s.isActive)),
@@ -62,7 +75,7 @@ export default function SubscriptionListScreen() {
           </Text>
           {!item.isActive && (
             <View style={styles.inactiveBadge}>
-              <Text style={styles.inactiveBadgeText}>停止中</Text>
+              <Text style={styles.inactiveBadgeText}>解約済み</Text>
             </View>
           )}
         </View>
@@ -79,7 +92,7 @@ export default function SubscriptionListScreen() {
   const groupedByCategory = CATEGORIES.map((category) => ({
     title: category.label,
     icon: category.icon,
-    data: subscriptions.filter((sub) => sub.category === category.value),
+    data: filteredSubscriptions.filter((sub) => sub.category === category.value),
   })).filter((section) => section.data.length > 0);
 
   const renderSectionHeader = ({
@@ -145,6 +158,36 @@ export default function SubscriptionListScreen() {
         </View>
       </View>
 
+      {/* フィルタータブ */}
+      {cancelledCount > 0 && (
+        <View style={styles.filterContainer}>
+          <TouchableOpacity
+            style={[styles.filterTab, filterMode === 'all' && styles.filterTabActive]}
+            onPress={() => setFilterMode('all')}
+          >
+            <Text style={[styles.filterTabText, filterMode === 'all' && styles.filterTabTextActive]}>
+              すべて ({subscriptions.length})
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.filterTab, filterMode === 'active' && styles.filterTabActive]}
+            onPress={() => setFilterMode('active')}
+          >
+            <Text style={[styles.filterTabText, filterMode === 'active' && styles.filterTabTextActive]}>
+              有効 ({activeCount})
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.filterTab, filterMode === 'cancelled' && styles.filterTabActive]}
+            onPress={() => setFilterMode('cancelled')}
+          >
+            <Text style={[styles.filterTabText, filterMode === 'cancelled' && styles.filterTabTextActive]}>
+              解約済み ({cancelledCount})
+            </Text>
+          </TouchableOpacity>
+        </View>
+      )}
+
       {/* ツールバー */}
       <View style={styles.toolbar}>
         <View style={styles.viewToggle}>
@@ -186,7 +229,7 @@ export default function SubscriptionListScreen() {
       {/* リスト */}
       {viewMode === 'list' ? (
         <FlatList
-          data={subscriptions}
+          data={filteredSubscriptions}
           renderItem={renderSubscriptionItem}
           keyExtractor={(item) => item.id}
           contentContainerStyle={styles.listContent}
@@ -246,6 +289,31 @@ const createStyles = (theme: ReturnType<typeof useTheme>) =>
     summaryLabel: {
       fontSize: 14,
       color: theme.colors.textSecondary,
+    },
+    filterContainer: {
+      flexDirection: 'row',
+      marginHorizontal: 16,
+      marginTop: 12,
+      backgroundColor: theme.colors.card,
+      borderRadius: 10,
+      padding: 3,
+    },
+    filterTab: {
+      flex: 1,
+      alignItems: 'center',
+      paddingVertical: 8,
+      borderRadius: 8,
+    },
+    filterTabActive: {
+      backgroundColor: theme.colors.primary,
+    },
+    filterTabText: {
+      fontSize: 13,
+      fontWeight: '600',
+      color: theme.colors.textSecondary,
+    },
+    filterTabTextActive: {
+      color: '#FFFFFF',
     },
     toolbar: {
       flexDirection: 'row',
