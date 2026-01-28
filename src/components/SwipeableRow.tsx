@@ -7,6 +7,7 @@ import {
   PanResponder,
   Dimensions,
   TouchableOpacity,
+  ViewStyle,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 
@@ -17,9 +18,10 @@ const DELETE_WIDTH = 80;
 interface Props {
   children: React.ReactNode;
   onDelete?: () => void;
+  style?: ViewStyle;
 }
 
-export default function SwipeableRow({ children, onDelete }: Props) {
+export default function SwipeableRow({ children, onDelete, style }: Props) {
   const translateX = useRef(new Animated.Value(0)).current;
 
   const panResponder = useRef(
@@ -51,7 +53,7 @@ export default function SwipeableRow({ children, onDelete }: Props) {
   ).current;
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, style]}>
       {/* Delete button anchored to the right edge, revealed by swipe */}
       <TouchableOpacity
         style={styles.deleteButton}
@@ -82,6 +84,7 @@ export default function SwipeableRow({ children, onDelete }: Props) {
 const styles = StyleSheet.create({
   container: {
     overflow: 'hidden',
+    borderRadius: 14,
   },
   deleteButton: {
     position: 'absolute',
@@ -92,8 +95,6 @@ const styles = StyleSheet.create({
     backgroundColor: '#D32F2F',
     justifyContent: 'center',
     alignItems: 'center',
-    borderTopRightRadius: 14,
-    borderBottomRightRadius: 14,
   },
   deleteText: {
     color: '#FFF',

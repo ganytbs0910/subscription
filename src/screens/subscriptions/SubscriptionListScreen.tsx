@@ -86,6 +86,7 @@ export default function SubscriptionListScreen() {
   const renderSubscriptionItem = ({ item }: { item: Subscription }) => (
     <SwipeableRow
       onDelete={() => handleDeleteItem(item)}
+      style={{ marginBottom: 8 }}
     >
       <TouchableOpacity
         style={styles.subscriptionCard}
@@ -480,7 +481,6 @@ const createStyles = (theme: ReturnType<typeof useTheme>) =>
       backgroundColor: theme.colors.card,
       borderRadius: 14,
       padding: 14,
-      marginBottom: 8,
     },
     iconContainer: {
       width: 44,
