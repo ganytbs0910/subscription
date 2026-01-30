@@ -20,15 +20,17 @@ export default function InsightsScreen() {
   const styles = createStyles(theme);
 
   const activeSubscriptions = subscriptions.filter((s) => s.isActive);
+  // サブスクのみ（課金を除外）
+  const activeSubscriptionsOnly = activeSubscriptions.filter((s) => s.type !== 'payment');
   const totalPaid = calculateTotalPaidSinceStart(subscriptions);
 
-  // 月額ランキング Top5
-  const top5 = [...activeSubscriptions]
+  // 月額ランキング Top5（サブスクのみ）
+  const top5 = [...activeSubscriptionsOnly]
     .sort((a, b) => getMonthlyAmount(b.price, b.billingCycle) - getMonthlyAmount(a.price, a.billingCycle))
     .slice(0, 5);
 
-  // 節約提案
-  const suggestions = getSavingSuggestions(activeSubscriptions).slice(0, 3);
+  // 節約提案（サブスクのみ）
+  const suggestions = getSavingSuggestions(activeSubscriptionsOnly).slice(0, 3);
 
   return (
     <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>

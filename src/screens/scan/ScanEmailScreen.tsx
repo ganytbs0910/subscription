@@ -425,6 +425,7 @@ export default function ScanEmailScreen() {
           nextBillingDate: nextMonth.toISOString(),
           startDate,
           isActive,
+          type: sub.type,
           paymentHistory,
           totalPaidFromEmail: sub.totalPaid,
           subItems,
@@ -722,28 +723,42 @@ export default function ScanEmailScreen() {
                     <Text style={styles.resultCategory}>
                       {getCategoryLabel(sub.category)}
                     </Text>
-                    {sub.type === 'subscription' && sub.paymentHistory && sub.paymentHistory.length > 0 && (() => {
-                      const sortedHistory = [...sub.paymentHistory].sort(
-                        (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()
-                      );
-                      const lastDate = new Date(sortedHistory[0].date);
-                      const now = new Date();
-                      const monthsDiff =
-                        (now.getFullYear() - lastDate.getFullYear()) * 12 +
-                        (now.getMonth() - lastDate.getMonth());
-                      const cycle = sub.billingCycle || 'monthly';
-                      const active =
-                        cycle === 'monthly' ? monthsDiff <= 1 :
-                        cycle === 'yearly' ? monthsDiff <= 12 :
-                        cycle === 'quarterly' ? monthsDiff <= 3 :
-                        Math.floor((now.getTime() - lastDate.getTime()) / 86400000) <= 14;
-                      return (
-                        <View style={[styles.statusBadge, { backgroundColor: active ? '#34C75920' : '#FF3B3020' }]}>
-                          <Text style={[styles.statusBadgeText, { color: active ? '#34C759' : '#FF3B30' }]}>
-                            {active ? '有効の可能性' : '解約済み'}
-                          </Text>
-                        </View>
-                      );
+                    {(() => {
+                      // 課金（単発購入）の場合
+                      if (sub.type === 'payment') {
+                        return (
+                          <View style={[styles.statusBadge, { backgroundColor: '#FF950020' }]}>
+                            <Text style={[styles.statusBadgeText, { color: '#FF9500' }]}>
+                              課金
+                            </Text>
+                          </View>
+                        );
+                      }
+                      // サブスクの場合
+                      if (sub.type === 'subscription' && sub.paymentHistory && sub.paymentHistory.length > 0) {
+                        const sortedHistory = [...sub.paymentHistory].sort(
+                          (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()
+                        );
+                        const lastDate = new Date(sortedHistory[0].date);
+                        const now = new Date();
+                        const monthsDiff =
+                          (now.getFullYear() - lastDate.getFullYear()) * 12 +
+                          (now.getMonth() - lastDate.getMonth());
+                        const cycle = sub.billingCycle || 'monthly';
+                        const active =
+                          cycle === 'monthly' ? monthsDiff <= 1 :
+                          cycle === 'yearly' ? monthsDiff <= 12 :
+                          cycle === 'quarterly' ? monthsDiff <= 3 :
+                          Math.floor((now.getTime() - lastDate.getTime()) / 86400000) <= 14;
+                        return (
+                          <View style={[styles.statusBadge, { backgroundColor: active ? '#34C75920' : '#FF3B3020' }]}>
+                            <Text style={[styles.statusBadgeText, { color: active ? '#34C759' : '#FF3B30' }]}>
+                              {active ? '契約中' : '解約済み'}
+                            </Text>
+                          </View>
+                        );
+                      }
+                      return null;
                     })()}
                   </View>
                   {/* サブアイテム（内訳）を表示 */}

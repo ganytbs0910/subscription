@@ -79,7 +79,11 @@ export default function DashboardScreen() {
       }
     >
       {/* メインカード - 月額合計 */}
-      <View style={styles.mainCard}>
+      <TouchableOpacity
+        style={styles.mainCard}
+        onPress={() => navigation.navigate('PaymentHistory')}
+        activeOpacity={0.8}
+      >
         <Text style={styles.mainCardLabel}>今月の支払い</Text>
         <Text style={styles.mainCardAmount}>
           {formatPrice(monthlyTotal, settings.currency)}
@@ -116,7 +120,7 @@ export default function DashboardScreen() {
             <Text style={styles.mainCardStatLabel}>年間合計</Text>
           </View>
         </View>
-      </View>
+      </TouchableOpacity>
 
       {/* 予算プログレスバー */}
       {budget && budget > 0 && (
@@ -197,9 +201,9 @@ export default function DashboardScreen() {
       )}
 
       {/* 月別支出バーチャート */}
-      {monthlyHistory.some((m) => m.total > 0) && (
+      {subscriptions.length > 0 && (
         <View style={styles.section}>
-          <MonthlyBarChart data={monthlyHistory} currency={settings.currency} />
+          <MonthlyBarChart subscriptions={subscriptions} currency={settings.currency} />
         </View>
       )}
 
@@ -286,12 +290,12 @@ export default function DashboardScreen() {
         )}
       </View>
 
-      {/* サブスク一覧へ */}
-      {activeSubscriptions.length > 0 && (
+      {/* サブスク一覧へ（課金は除外） */}
+      {activeSubscriptions.filter(s => s.type !== 'payment').length > 0 && (
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>登録中のサブスク</Text>
           <View style={styles.subscriptionGrid}>
-            {activeSubscriptions.slice(0, 6).map((sub) => (
+            {activeSubscriptions.filter(s => s.type !== 'payment').slice(0, 6).map((sub) => (
               <TouchableOpacity
                 key={sub.id}
                 style={styles.subscriptionMini}
@@ -318,9 +322,9 @@ export default function DashboardScreen() {
               </TouchableOpacity>
             ))}
           </View>
-          {activeSubscriptions.length > 6 && (
+          {activeSubscriptions.filter(s => s.type !== 'payment').length > 6 && (
             <Text style={styles.moreText}>
-              他 {activeSubscriptions.length - 6} 件
+              他 {activeSubscriptions.filter(s => s.type !== 'payment').length - 6} 件
             </Text>
           )}
         </View>

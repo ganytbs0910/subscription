@@ -415,15 +415,56 @@ const isPaymentRelatedEmail = (subject: string, body: string): boolean => {
   return paymentKeywords.some(keyword => text.includes(keyword));
 };
 
+// ゲーム内課金（単発購入）かどうかを判定
+const isInAppPurchase = (text: string): boolean => {
+  const textLower = text.toLowerCase();
+
+  // ゲーム内通貨・アイテムのパターン
+  const inAppPatterns = [
+    // ゲーム内通貨
+    /ジェム|gem/i,
+    /コイン|coin/i,
+    /エメラルド|emerald/i,
+    /ゴールド|gold/i,
+    /ダイヤ|diamond/i,
+    /クリスタル|crystal/i,
+    /ルビー|ruby/i,
+    /スター|star/i,
+    /ポイント購入/i,
+    /\d+個/,  // 「60個」「950個」など
+    // ゲーム名でアプリ内課金が多いもの
+    /pokémon|pokemon|ポケモン/i,
+    /clash|クラッシュ/i,
+    /brawl|ブロスタ/i,
+    /line\s*(coin|コイン)/i,
+    // アプリ内課金の明示的なキーワード
+    /アプリ内課金/i,
+    /in-app purchase/i,
+    /consumable/i,
+  ];
+
+  return inAppPatterns.some(pattern => pattern.test(text));
+};
+
 // サブスク（継続課金）かどうかを判定
 const isSubscriptionPayment = (text: string): boolean => {
+  // まずゲーム内課金かどうかをチェック（これらはサブスクではない）
+  if (isInAppPurchase(text)) {
+    // ただし、明示的なサブスクキーワードがある場合は除く
+    const explicitSubKeywords = ['月額', '年額', '自動更新', 'subscription', 'monthly plan', 'yearly plan'];
+    const hasExplicitSub = explicitSubKeywords.some(kw => text.toLowerCase().includes(kw.toLowerCase()));
+    if (!hasExplicitSub) {
+      return false;
+    }
+  }
+
   const subscriptionKeywords = [
     // 日本語
     '月額', '年額', '週額', '四半期', '定期', 'サブスクリプション',
-    '自動更新', '継続', '会員', 'メンバーシップ', 'プレミアム',
+    '自動更新', '継続', 'メンバーシップ',
     // English
-    'subscription', 'monthly', 'yearly', 'annual', 'weekly', 'quarterly',
-    'recurring', 'renewal', 'membership', 'premium', 'pro plan',
+    'subscription', 'monthly plan', 'yearly plan', 'annual plan', 'weekly plan',
+    'recurring', 'renewal', 'membership',
   ];
 
   const textLower = text.toLowerCase();

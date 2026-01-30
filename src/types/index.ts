@@ -1,5 +1,7 @@
 export type BillingCycle = 'monthly' | 'yearly' | 'weekly' | 'quarterly';
 
+export type SubscriptionType = 'subscription' | 'payment';
+
 export type Category =
   | 'streaming'
   | 'music'
@@ -48,6 +50,8 @@ export interface Subscription {
   isActive: boolean;
   createdAt: string;
   updatedAt: string;
+  // サブスク or 単発課金
+  type?: SubscriptionType;
   // メールから取得した支払い履歴
   paymentHistory?: PaymentRecord[];
   // メールから検出された実際の累計支払い額

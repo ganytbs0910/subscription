@@ -109,11 +109,30 @@ export default function SubscriptionListScreen() {
             <Text style={[styles.subscriptionName, !item.isActive && styles.textInactive]}>
               {item.name}
             </Text>
-            {!item.isActive && (
-              <View style={styles.inactiveBadge}>
-                <Text style={styles.inactiveBadgeText}>解約済み</Text>
-              </View>
-            )}
+            {(() => {
+              // 単発課金の場合
+              if (item.type === 'payment') {
+                return (
+                  <View style={styles.billingBadge}>
+                    <Text style={styles.billingBadgeText}>課金</Text>
+                  </View>
+                );
+              }
+              // 解約済みサブスク
+              if (!item.isActive) {
+                return (
+                  <View style={styles.inactiveBadge}>
+                    <Text style={styles.inactiveBadgeText}>解約済み</Text>
+                  </View>
+                );
+              }
+              // 契約中サブスク
+              return (
+                <View style={styles.activeBadge}>
+                  <Text style={styles.activeBadgeText}>契約中</Text>
+                </View>
+              );
+            })()}
           </View>
           <Text style={styles.subscriptionMeta}>
             {getBillingCycleLabel(item.billingCycle)}
@@ -519,6 +538,28 @@ const createStyles = (theme: ReturnType<typeof useTheme>) =>
       fontSize: 10,
       fontWeight: '600',
       color: theme.colors.error,
+    },
+    activeBadge: {
+      backgroundColor: theme.colors.primary + '20',
+      paddingHorizontal: 6,
+      paddingVertical: 2,
+      borderRadius: 4,
+    },
+    activeBadgeText: {
+      fontSize: 10,
+      fontWeight: '600',
+      color: theme.colors.primary,
+    },
+    billingBadge: {
+      backgroundColor: '#34C759' + '20',
+      paddingHorizontal: 6,
+      paddingVertical: 2,
+      borderRadius: 4,
+    },
+    billingBadgeText: {
+      fontSize: 10,
+      fontWeight: '600',
+      color: '#34C759',
     },
     subscriptionMeta: {
       fontSize: 12,
