@@ -1,6 +1,7 @@
 import type { PopularService, Category, BillingCycle } from '../types';
 
 export const POPULAR_SERVICES: PopularService[] = [
+  // 自動検出できないサービス（直接課金）
   {
     name: 'Netflix',
     icon: 'movie',
@@ -9,6 +10,7 @@ export const POPULAR_SERVICES: PopularService[] = [
     defaultPrice: 1490,
     defaultCurrency: 'JPY',
     defaultBillingCycle: 'monthly',
+    requiresManualEntry: true,
   },
   {
     name: 'Amazon Prime',
@@ -18,6 +20,7 @@ export const POPULAR_SERVICES: PopularService[] = [
     defaultPrice: 600,
     defaultCurrency: 'JPY',
     defaultBillingCycle: 'monthly',
+    requiresManualEntry: true,
   },
   {
     name: 'Disney+',
@@ -27,6 +30,7 @@ export const POPULAR_SERVICES: PopularService[] = [
     defaultPrice: 990,
     defaultCurrency: 'JPY',
     defaultBillingCycle: 'monthly',
+    requiresManualEntry: true,
   },
   {
     name: 'Spotify',
@@ -36,15 +40,7 @@ export const POPULAR_SERVICES: PopularService[] = [
     defaultPrice: 980,
     defaultCurrency: 'JPY',
     defaultBillingCycle: 'monthly',
-  },
-  {
-    name: 'Apple Music',
-    icon: 'music-note',
-    color: '#FC3C44',
-    category: 'music',
-    defaultPrice: 1080,
-    defaultCurrency: 'JPY',
-    defaultBillingCycle: 'monthly',
+    requiresManualEntry: true,
   },
   {
     name: 'YouTube Premium',
@@ -54,15 +50,7 @@ export const POPULAR_SERVICES: PopularService[] = [
     defaultPrice: 1280,
     defaultCurrency: 'JPY',
     defaultBillingCycle: 'monthly',
-  },
-  {
-    name: 'iCloud+',
-    icon: 'cloud',
-    color: '#3693F3',
-    category: 'cloud',
-    defaultPrice: 130,
-    defaultCurrency: 'JPY',
-    defaultBillingCycle: 'monthly',
+    requiresManualEntry: true,
   },
   {
     name: 'Google One',
@@ -72,6 +60,7 @@ export const POPULAR_SERVICES: PopularService[] = [
     defaultPrice: 250,
     defaultCurrency: 'JPY',
     defaultBillingCycle: 'monthly',
+    requiresManualEntry: true,
   },
   {
     name: 'Microsoft 365',
@@ -81,6 +70,7 @@ export const POPULAR_SERVICES: PopularService[] = [
     defaultPrice: 12984,
     defaultCurrency: 'JPY',
     defaultBillingCycle: 'yearly',
+    requiresManualEntry: true,
   },
   {
     name: 'Adobe Creative Cloud',
@@ -90,6 +80,7 @@ export const POPULAR_SERVICES: PopularService[] = [
     defaultPrice: 6480,
     defaultCurrency: 'JPY',
     defaultBillingCycle: 'monthly',
+    requiresManualEntry: true,
   },
   {
     name: 'ChatGPT Plus',
@@ -99,6 +90,7 @@ export const POPULAR_SERVICES: PopularService[] = [
     defaultPrice: 3000,
     defaultCurrency: 'JPY',
     defaultBillingCycle: 'monthly',
+    requiresManualEntry: true,
   },
   {
     name: 'Claude Pro',
@@ -108,6 +100,7 @@ export const POPULAR_SERVICES: PopularService[] = [
     defaultPrice: 3000,
     defaultCurrency: 'JPY',
     defaultBillingCycle: 'monthly',
+    requiresManualEntry: true,
   },
   {
     name: 'Nintendo Switch Online',
@@ -117,6 +110,7 @@ export const POPULAR_SERVICES: PopularService[] = [
     defaultPrice: 2400,
     defaultCurrency: 'JPY',
     defaultBillingCycle: 'yearly',
+    requiresManualEntry: true,
   },
   {
     name: 'PlayStation Plus',
@@ -126,6 +120,7 @@ export const POPULAR_SERVICES: PopularService[] = [
     defaultPrice: 6800,
     defaultCurrency: 'JPY',
     defaultBillingCycle: 'yearly',
+    requiresManualEntry: true,
   },
   {
     name: 'Xbox Game Pass',
@@ -135,6 +130,28 @@ export const POPULAR_SERVICES: PopularService[] = [
     defaultPrice: 1100,
     defaultCurrency: 'JPY',
     defaultBillingCycle: 'monthly',
+    requiresManualEntry: true,
+  },
+  // 自動検出可能なサービス（App Store経由）
+  {
+    name: 'Apple Music',
+    icon: 'music-note',
+    color: '#FC3C44',
+    category: 'music',
+    defaultPrice: 1080,
+    defaultCurrency: 'JPY',
+    defaultBillingCycle: 'monthly',
+    requiresManualEntry: false,
+  },
+  {
+    name: 'iCloud+',
+    icon: 'cloud',
+    color: '#3693F3',
+    category: 'cloud',
+    defaultPrice: 130,
+    defaultCurrency: 'JPY',
+    defaultBillingCycle: 'monthly',
+    requiresManualEntry: false,
   },
 ];
 

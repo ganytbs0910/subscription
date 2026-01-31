@@ -13,9 +13,13 @@ import SubscriptionDetailScreen from '../screens/subscriptions/SubscriptionDetai
 import AddSubscriptionScreen from '../screens/subscriptions/AddSubscriptionScreen';
 import EditSubscriptionScreen from '../screens/subscriptions/EditSubscriptionScreen';
 import SettingsScreen from '../screens/settings/SettingsScreen';
+import PrivacyPolicyScreen from '../screens/settings/PrivacyPolicyScreen';
+import TermsOfServiceScreen from '../screens/settings/TermsOfServiceScreen';
 import ScanEmailScreen from '../screens/scan/ScanEmailScreen';
 import PaymentHistoryScreen from '../screens/history/PaymentHistoryScreen';
 import InsightsScreen from '../screens/insights/InsightsScreen';
+import OnboardingScreen from '../screens/onboarding/OnboardingScreen';
+import { useSubscriptionStore } from '../stores/subscriptionStore';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 const Tab = createBottomTabNavigator<MainTabParamList>();
@@ -94,6 +98,8 @@ function MainTabs() {
 
 export default function Navigator() {
   const theme = useTheme();
+  const { settings } = useSubscriptionStore();
+  const hasSeenOnboarding = settings.hasSeenOnboarding;
 
   const navigationTheme = theme.isDark
     ? {
@@ -128,7 +134,13 @@ export default function Navigator() {
           },
           headerTintColor: theme.colors.text,
         }}
+        initialRouteName={hasSeenOnboarding ? 'Main' : 'Onboarding'}
       >
+        <Stack.Screen
+          name="Onboarding"
+          component={OnboardingScreen}
+          options={{ headerShown: false }}
+        />
         <Stack.Screen
           name="Main"
           component={MainTabs}
@@ -142,7 +154,7 @@ export default function Navigator() {
         <Stack.Screen
           name="AddSubscription"
           component={AddSubscriptionScreen}
-          options={{ title: 'サブスク追加' }}
+          options={{ title: '手動で追加' }}
         />
         <Stack.Screen
           name="EditSubscription"
@@ -158,6 +170,16 @@ export default function Navigator() {
           name="PaymentHistory"
           component={PaymentHistoryScreen}
           options={{ title: '支払い履歴' }}
+        />
+        <Stack.Screen
+          name="PrivacyPolicy"
+          component={PrivacyPolicyScreen}
+          options={{ title: 'プライバシーポリシー' }}
+        />
+        <Stack.Screen
+          name="TermsOfService"
+          component={TermsOfServiceScreen}
+          options={{ title: '利用規約' }}
         />
       </Stack.Navigator>
     </NavigationContainer>

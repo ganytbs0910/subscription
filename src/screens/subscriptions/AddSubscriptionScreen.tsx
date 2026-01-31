@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   View,
   Text,
@@ -104,6 +104,16 @@ export default function AddSubscriptionScreen() {
     navigation.goBack();
   };
 
+  // 手動追加が必要なサービスと自動検出可能なサービスを分離
+  const manualServices = useMemo(
+    () => POPULAR_SERVICES.filter((s) => s.requiresManualEntry),
+    []
+  );
+  const autoDetectableServices = useMemo(
+    () => POPULAR_SERVICES.filter((s) => !s.requiresManualEntry),
+    []
+  );
+
   if (showPresets) {
     return (
       <ScrollView style={styles.container}>
@@ -114,20 +124,36 @@ export default function AddSubscriptionScreen() {
           </TouchableOpacity>
         </View>
 
+        {/* 手動追加が必要なサービス（メールで検出不可） */}
+        <View style={styles.manualSection}>
+          <View style={styles.manualHeader}>
+            <Icon name="alert-circle-outline" size={18} color="#FB8C00" />
+            <Text style={styles.manualSectionTitle}>手動追加が必要</Text>
+          </View>
+          <Text style={styles.manualDescription}>
+            これらのサービスはメールスキャンで検出できません
+          </Text>
+        </View>
+
         <View style={styles.presetGrid}>
-          {POPULAR_SERVICES.map((service) => (
+          {manualServices.map((service) => (
             <TouchableOpacity
               key={service.name}
               style={styles.presetCard}
               onPress={() => handleSelectPreset(service)}
             >
-              <View
-                style={[
-                  styles.presetIcon,
-                  { backgroundColor: service.color },
-                ]}
-              >
-                <Icon name={service.icon} size={28} color="#FFFFFF" />
+              <View style={styles.presetIconWrapper}>
+                <View
+                  style={[
+                    styles.presetIcon,
+                    { backgroundColor: service.color },
+                  ]}
+                >
+                  <Icon name={service.icon} size={28} color="#FFFFFF" />
+                </View>
+                <View style={styles.manualBadge}>
+                  <Icon name="hand-pointing-right" size={12} color="#FFF" />
+                </View>
               </View>
               <Text style={styles.presetName}>{service.name}</Text>
               {service.defaultPrice && (
@@ -138,6 +164,48 @@ export default function AddSubscriptionScreen() {
             </TouchableOpacity>
           ))}
         </View>
+
+        {/* 自動検出可能なサービス */}
+        {autoDetectableServices.length > 0 && (
+          <>
+            <View style={styles.autoSection}>
+              <View style={styles.manualHeader}>
+                <Icon name="email-check-outline" size={18} color="#4CAF50" />
+                <Text style={styles.autoSectionTitle}>自動検出可能</Text>
+              </View>
+              <Text style={styles.manualDescription}>
+                メールスキャンで自動的に検出されます
+              </Text>
+            </View>
+
+            <View style={styles.presetGrid}>
+              {autoDetectableServices.map((service) => (
+                <TouchableOpacity
+                  key={service.name}
+                  style={[styles.presetCard, styles.autoPresetCard]}
+                  onPress={() => handleSelectPreset(service)}
+                >
+                  <View
+                    style={[
+                      styles.presetIcon,
+                      { backgroundColor: service.color, opacity: 0.7 },
+                    ]}
+                  >
+                    <Icon name={service.icon} size={28} color="#FFFFFF" />
+                  </View>
+                  <Text style={[styles.presetName, styles.autoPresetName]}>
+                    {service.name}
+                  </Text>
+                  {service.defaultPrice && (
+                    <Text style={styles.presetPrice}>
+                      ¥{service.defaultPrice.toLocaleString()}
+                    </Text>
+                  )}
+                </TouchableOpacity>
+              ))}
+            </View>
+          </>
+        )}
       </ScrollView>
     );
   }
@@ -314,6 +382,12 @@ const createStyles = (theme: ReturnType<typeof useTheme>) =>
       padding: 8,
       alignItems: 'center',
     },
+    autoPresetCard: {
+      opacity: 0.6,
+    },
+    presetIconWrapper: {
+      position: 'relative',
+    },
     presetIcon: {
       width: 56,
       height: 56,
@@ -322,16 +396,60 @@ const createStyles = (theme: ReturnType<typeof useTheme>) =>
       justifyContent: 'center',
       marginBottom: 8,
     },
+    manualBadge: {
+      position: 'absolute',
+      bottom: 4,
+      right: -4,
+      width: 20,
+      height: 20,
+      borderRadius: 10,
+      backgroundColor: '#FB8C00',
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
     presetName: {
       fontSize: 13,
       fontWeight: '500',
       color: theme.colors.text,
       textAlign: 'center',
     },
+    autoPresetName: {
+      color: theme.colors.textSecondary,
+    },
     presetPrice: {
       fontSize: 12,
       color: theme.colors.textSecondary,
       marginTop: 2,
+    },
+    manualSection: {
+      paddingHorizontal: 16,
+      marginBottom: 8,
+    },
+    autoSection: {
+      paddingHorizontal: 16,
+      marginTop: 16,
+      marginBottom: 8,
+    },
+    manualHeader: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+    },
+    manualSectionTitle: {
+      fontSize: 15,
+      fontWeight: '600',
+      color: '#FB8C00',
+    },
+    autoSectionTitle: {
+      fontSize: 15,
+      fontWeight: '600',
+      color: '#4CAF50',
+    },
+    manualDescription: {
+      fontSize: 12,
+      color: theme.colors.textSecondary,
+      marginTop: 4,
+      marginLeft: 24,
     },
     formContainer: {
       flex: 1,

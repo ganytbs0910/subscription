@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -7,20 +7,36 @@ import {
   TouchableOpacity,
   Alert,
   TextInput,
+  Switch,
+  Linking,
 } from 'react-native';
+import { useNavigation } from '@react-navigation/native';
+import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 
 import { useTheme } from '../../hooks/useTheme';
 import { useSubscriptionStore } from '../../stores/subscriptionStore';
 import { CURRENCIES } from '../../utils/presets';
+import {
+  setupNotifications,
+  scheduleAllPaymentReminders,
+  cancelAllReminders,
+  checkNotificationPermission,
+} from '../../services/notificationService';
+import type { RootStackParamList } from '../../types';
 
 type ThemeOption = 'light' | 'dark' | 'system';
+type NavigationProp = NativeStackNavigationProp<RootStackParamList>;
 
 export default function SettingsScreen() {
   const theme = useTheme();
+  const navigation = useNavigation<NavigationProp>();
   const { settings, updateSettings, subscriptions } = useSubscriptionStore();
   const [budgetText, setBudgetText] = useState(
     settings.monthlyBudget?.toString() || ''
+  );
+  const [notificationsEnabled, setNotificationsEnabled] = useState(
+    settings.notificationsEnabled || false
   );
 
   const styles = createStyles(theme);
@@ -30,6 +46,50 @@ export default function SettingsScreen() {
     { value: 'light', label: 'ライト', icon: 'white-balance-sunny' },
     { value: 'dark', label: 'ダーク', icon: 'moon-waning-crescent' },
   ];
+
+  const notificationDaysOptions = [
+    { value: 0, label: '当日' },
+    { value: 1, label: '1日前' },
+    { value: 3, label: '3日前' },
+    { value: 7, label: '1週間前' },
+  ];
+
+  // 通知設定の切り替え
+  const handleToggleNotifications = async (enabled: boolean) => {
+    if (enabled) {
+      const granted = await setupNotifications();
+      if (granted) {
+        setNotificationsEnabled(true);
+        updateSettings({ notificationsEnabled: true });
+        await scheduleAllPaymentReminders(
+          subscriptions,
+          settings.notificationDaysBefore || 1
+        );
+        Alert.alert('通知を有効にしました', '支払い日のリマインダーが届きます');
+      } else {
+        Alert.alert(
+          '通知が許可されていません',
+          '設定アプリから通知を許可してください',
+          [
+            { text: 'キャンセル', style: 'cancel' },
+            { text: '設定を開く', onPress: () => Linking.openSettings() },
+          ]
+        );
+      }
+    } else {
+      setNotificationsEnabled(false);
+      updateSettings({ notificationsEnabled: false });
+      await cancelAllReminders();
+    }
+  };
+
+  // 通知日数の変更
+  const handleChangeDaysBefore = async (days: number) => {
+    updateSettings({ notificationDaysBefore: days });
+    if (notificationsEnabled) {
+      await scheduleAllPaymentReminders(subscriptions, days);
+    }
+  };
 
   const handleClearData = () => {
     Alert.alert(
@@ -114,6 +174,54 @@ export default function SettingsScreen() {
       </View>
 
       <View style={styles.section}>
+        <Text style={styles.sectionTitle}>通知</Text>
+        <View style={styles.card}>
+          <View style={styles.settingRow}>
+            <View style={styles.settingLeft}>
+              <Icon name="bell" size={22} color={theme.colors.primary} />
+              <Text style={styles.settingLabel}>支払いリマインダー</Text>
+            </View>
+            <Switch
+              value={notificationsEnabled}
+              onValueChange={handleToggleNotifications}
+              trackColor={{ false: theme.colors.border, true: theme.colors.primary }}
+            />
+          </View>
+          {notificationsEnabled && (
+            <>
+              <View style={styles.settingRowBorder} />
+              <View style={styles.daysSelector}>
+                <Text style={styles.daysSelectorLabel}>通知タイミング</Text>
+                <View style={styles.daysOptions}>
+                  {notificationDaysOptions.map((option) => (
+                    <TouchableOpacity
+                      key={option.value}
+                      style={[
+                        styles.daysOption,
+                        settings.notificationDaysBefore === option.value &&
+                          styles.daysOptionActive,
+                      ]}
+                      onPress={() => handleChangeDaysBefore(option.value)}
+                    >
+                      <Text
+                        style={[
+                          styles.daysOptionText,
+                          settings.notificationDaysBefore === option.value &&
+                            styles.daysOptionTextActive,
+                        ]}
+                      >
+                        {option.label}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </View>
+            </>
+          )}
+        </View>
+      </View>
+
+      <View style={styles.section}>
         <Text style={styles.sectionTitle}>月間予算</Text>
         <View style={styles.card}>
           <View style={styles.budgetRow}>
@@ -167,6 +275,32 @@ export default function SettingsScreen() {
                 すべてのデータを削除
               </Text>
             </View>
+          </TouchableOpacity>
+        </View>
+      </View>
+
+      <View style={styles.section}>
+        <Text style={styles.sectionTitle}>その他</Text>
+        <View style={styles.card}>
+          <TouchableOpacity
+            style={[styles.settingRow, styles.settingRowBorder]}
+            onPress={() => (navigation as any).navigate('PrivacyPolicy')}
+          >
+            <View style={styles.settingLeft}>
+              <Icon name="shield-account" size={22} color={theme.colors.primary} />
+              <Text style={styles.settingLabel}>プライバシーポリシー</Text>
+            </View>
+            <Icon name="chevron-right" size={22} color={theme.colors.textSecondary} />
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.settingRow}
+            onPress={() => (navigation as any).navigate('TermsOfService')}
+          >
+            <View style={styles.settingLeft}>
+              <Icon name="file-document" size={22} color={theme.colors.primary} />
+              <Text style={styles.settingLabel}>利用規約</Text>
+            </View>
+            <Icon name="chevron-right" size={22} color={theme.colors.textSecondary} />
           </TouchableOpacity>
         </View>
       </View>
@@ -259,6 +393,35 @@ const createStyles = (theme: ReturnType<typeof useTheme>) =>
       fontSize: 18,
       color: theme.colors.text,
       padding: 0,
+    },
+    daysSelector: {
+      padding: 16,
+    },
+    daysSelectorLabel: {
+      fontSize: 14,
+      color: theme.colors.textSecondary,
+      marginBottom: 10,
+    },
+    daysOptions: {
+      flexDirection: 'row',
+      gap: 8,
+    },
+    daysOption: {
+      paddingHorizontal: 14,
+      paddingVertical: 8,
+      borderRadius: 8,
+      backgroundColor: theme.colors.background,
+    },
+    daysOptionActive: {
+      backgroundColor: theme.colors.primary,
+    },
+    daysOptionText: {
+      fontSize: 13,
+      fontWeight: '600',
+      color: theme.colors.text,
+    },
+    daysOptionTextActive: {
+      color: '#FFFFFF',
     },
     footer: {
       alignItems: 'center',

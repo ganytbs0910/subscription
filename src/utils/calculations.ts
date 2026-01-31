@@ -268,10 +268,10 @@ export const getSavingSuggestions = (subs: Subscription[]): Array<{ name: string
     .sort((a, b) => b.yearlyAmount - a.yearlyAmount);
 };
 
-// 解約済みサブスクの月額合計（節約額）
+// 解約済みサブスクの月額合計（節約額）- 課金は除外
 export const calculateSavedAmount = (subs: Subscription[]): number => {
   return subs
-    .filter((s) => !s.isActive)
+    .filter((s) => !s.isActive && s.type !== 'payment')
     .reduce((total, s) => total + getMonthlyAmount(s.price, s.billingCycle), 0);
 };
 

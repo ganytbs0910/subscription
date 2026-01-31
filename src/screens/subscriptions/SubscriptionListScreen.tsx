@@ -23,7 +23,7 @@ import type { RootStackParamList, Subscription } from '../../types';
 
 type NavigationProp = NativeStackNavigationProp<RootStackParamList>;
 type ViewMode = 'list' | 'category';
-type FilterMode = 'all' | 'active' | 'cancelled';
+type FilterMode = 'all' | 'active' | 'payment' | 'cancelled';
 type SortMode = 'name' | 'price' | 'nextBilling';
 
 export default function SubscriptionListScreen() {
@@ -35,20 +35,28 @@ export default function SubscriptionListScreen() {
   const [searchQuery, setSearchQuery] = useState('');
   const [sortMode, setSortMode] = useState<SortMode>('name');
 
-  const activeCount = useMemo(() =>
-    subscriptions.filter(s => s.isActive).length,
+  // サブスクのみのカウント（課金を除外）
+  const activeSubsCount = useMemo(() =>
+    subscriptions.filter(s => s.isActive && s.type !== 'payment').length,
+    [subscriptions]
+  );
+
+  // 課金のカウント
+  const paymentCount = useMemo(() =>
+    subscriptions.filter(s => s.type === 'payment').length,
     [subscriptions]
   );
 
   const cancelledCount = useMemo(() =>
-    subscriptions.filter(s => !s.isActive).length,
+    subscriptions.filter(s => !s.isActive && s.type !== 'payment').length,
     [subscriptions]
   );
 
   const filteredSubscriptions = useMemo(() => {
     let result = subscriptions;
-    if (filterMode === 'active') result = result.filter(s => s.isActive);
-    if (filterMode === 'cancelled') result = result.filter(s => !s.isActive);
+    if (filterMode === 'active') result = result.filter(s => s.isActive && s.type !== 'payment');
+    if (filterMode === 'payment') result = result.filter(s => s.type === 'payment');
+    if (filterMode === 'cancelled') result = result.filter(s => !s.isActive && s.type !== 'payment');
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
       result = result.filter(s => s.name.toLowerCase().includes(q));
@@ -65,8 +73,9 @@ export default function SubscriptionListScreen() {
     return result;
   }, [subscriptions, filterMode, searchQuery, sortMode]);
 
+  // サブスクのみの月額合計（課金を除外）
   const monthlyTotal = useMemo(() =>
-    calculateTotalMonthly(subscriptions.filter(s => s.isActive)),
+    calculateTotalMonthly(subscriptions.filter(s => s.isActive && s.type !== 'payment')),
     [subscriptions]
   );
 
@@ -86,15 +95,10 @@ export default function SubscriptionListScreen() {
   const renderSubscriptionItem = ({ item }: { item: Subscription }) => (
     <SwipeableRow
       onDelete={() => handleDeleteItem(item)}
+      onPress={() => navigation.navigate('SubscriptionDetail', { subscriptionId: item.id })}
       style={{ marginBottom: 8 }}
     >
-      <TouchableOpacity
-        style={styles.subscriptionCard}
-        onPress={() =>
-          navigation.navigate('SubscriptionDetail', { subscriptionId: item.id })
-        }
-        activeOpacity={0.7}
-      >
+      <View style={styles.subscriptionCard}>
         <View
           style={[
             styles.iconContainer,
@@ -105,9 +109,12 @@ export default function SubscriptionListScreen() {
           <Icon name={item.icon || 'credit-card'} size={22} color="#FFFFFF" />
         </View>
         <View style={styles.subscriptionInfo}>
-          <View style={styles.nameRow}>
-            <Text style={[styles.subscriptionName, !item.isActive && styles.textInactive]}>
-              {item.name}
+          <Text style={[styles.subscriptionName, !item.isActive && styles.textInactive]} numberOfLines={2}>
+            {item.name}
+          </Text>
+          <View style={styles.metaRow}>
+            <Text style={styles.subscriptionMeta}>
+              {item.type === 'payment' ? '買い切り' : getBillingCycleLabel(item.billingCycle)}
             </Text>
             {(() => {
               // 単発課金の場合
@@ -134,14 +141,11 @@ export default function SubscriptionListScreen() {
               );
             })()}
           </View>
-          <Text style={styles.subscriptionMeta}>
-            {getBillingCycleLabel(item.billingCycle)}
-          </Text>
         </View>
         <Text style={[styles.subscriptionPrice, !item.isActive && styles.textInactive]}>
           {formatPrice(item.price, item.currency)}
         </Text>
-      </TouchableOpacity>
+      </View>
     </SwipeableRow>
   );
 
@@ -203,7 +207,7 @@ export default function SubscriptionListScreen() {
       {/* サマリーヘッダー */}
       <View style={styles.summaryHeader}>
         <View style={styles.summaryLeft}>
-          <Text style={styles.summaryCount}>{activeCount}件</Text>
+          <Text style={styles.summaryCount}>{activeSubsCount}件</Text>
           <Text style={styles.summaryLabel}>契約中</Text>
         </View>
         <View style={styles.summaryRight}>
@@ -215,14 +219,14 @@ export default function SubscriptionListScreen() {
       </View>
 
       {/* フィルタータブ */}
-      {cancelledCount > 0 && (
+      {(paymentCount > 0 || cancelledCount > 0) && (
         <View style={styles.filterContainer}>
           <TouchableOpacity
             style={[styles.filterTab, filterMode === 'all' && styles.filterTabActive]}
             onPress={() => setFilterMode('all')}
           >
             <Text style={[styles.filterTabText, filterMode === 'all' && styles.filterTabTextActive]}>
-              すべて ({subscriptions.length})
+              すべて
             </Text>
           </TouchableOpacity>
           <TouchableOpacity
@@ -230,17 +234,29 @@ export default function SubscriptionListScreen() {
             onPress={() => setFilterMode('active')}
           >
             <Text style={[styles.filterTabText, filterMode === 'active' && styles.filterTabTextActive]}>
-              有効 ({activeCount})
+              サブスク ({activeSubsCount})
             </Text>
           </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.filterTab, filterMode === 'cancelled' && styles.filterTabActive]}
-            onPress={() => setFilterMode('cancelled')}
-          >
-            <Text style={[styles.filterTabText, filterMode === 'cancelled' && styles.filterTabTextActive]}>
-              解約済み ({cancelledCount})
-            </Text>
-          </TouchableOpacity>
+          {paymentCount > 0 && (
+            <TouchableOpacity
+              style={[styles.filterTab, filterMode === 'payment' && styles.filterTabActive]}
+              onPress={() => setFilterMode('payment')}
+            >
+              <Text style={[styles.filterTabText, filterMode === 'payment' && styles.filterTabTextActive]}>
+                課金 ({paymentCount})
+              </Text>
+            </TouchableOpacity>
+          )}
+          {cancelledCount > 0 && (
+            <TouchableOpacity
+              style={[styles.filterTab, filterMode === 'cancelled' && styles.filterTabActive]}
+              onPress={() => setFilterMode('cancelled')}
+            >
+              <Text style={[styles.filterTabText, filterMode === 'cancelled' && styles.filterTabTextActive]}>
+                解約済み ({cancelledCount})
+              </Text>
+            </TouchableOpacity>
+          )}
         </View>
       )}
 
@@ -520,10 +536,17 @@ const createStyles = (theme: ReturnType<typeof useTheme>) =>
       alignItems: 'center',
       gap: 8,
     },
+    metaRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+      marginTop: 4,
+    },
     subscriptionName: {
       fontSize: 15,
       fontWeight: '600',
       color: theme.colors.text,
+      flexShrink: 1,
     },
     textInactive: {
       opacity: 0.5,

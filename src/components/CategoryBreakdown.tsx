@@ -26,13 +26,14 @@ export default function CategoryBreakdown({ subscriptions, currency }: Props) {
   const theme = useTheme();
   const styles = createStyles(theme);
 
-  const active = subscriptions.filter((s) => s.isActive);
-  const totalMonthly = active.reduce(
+  // サブスクのみ（課金を除外）- 月額の概念があるもののみ
+  const activeSubscriptionsOnly = subscriptions.filter((s) => s.isActive && s.type !== 'payment');
+  const totalMonthly = activeSubscriptionsOnly.reduce(
     (sum, s) => sum + getMonthlyAmount(s.price, s.billingCycle),
     0
   );
 
-  const categoryTotals = active.reduce<Record<string, number>>((acc, s) => {
+  const categoryTotals = activeSubscriptionsOnly.reduce<Record<string, number>>((acc, s) => {
     const amount = getMonthlyAmount(s.price, s.billingCycle);
     acc[s.category] = (acc[s.category] || 0) + amount;
     return acc;

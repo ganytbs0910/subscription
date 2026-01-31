@@ -500,7 +500,9 @@ const parseAppleReceipt = (body: string): AppleAppPurchase[] => {
     .replace(/\r\n/g, '\n')
     .replace(/\r/g, '\n');
 
-  console.log('[parseAppleReceipt] Apple領収書をパース中...');
+  if (__DEV__) {
+    console.log('[parseAppleReceipt] Apple領収書をパース中...');
+  }
 
   // 各アプリの課金ブロックを検出
   // パターン: アプリ名 → アイテム名 → (月額/アプリ内課金など) → 金額(¥XXX)
@@ -508,12 +510,14 @@ const parseAppleReceipt = (body: string): AppleAppPurchase[] => {
 
   const lines = text.split('\n').map(l => l.trim()).filter(l => l);
 
-  console.log(`[parseAppleReceipt] 行数: ${lines.length}`);
+  if (__DEV__) {
+    console.log(`[parseAppleReceipt] 行数: ${lines.length}`);
 
-  // デバッグ: 金額っぽい行を全て表示
-  const priceLines = lines.filter(l => /[¥￥]/.test(l) || /^\d{2,5}$/.test(l));
-  console.log(`[parseAppleReceipt] 金額を含む行:`);
-  priceLines.forEach(l => console.log(`  - "${l}"`));
+    // デバッグ: 金額っぽい行を全て表示
+    const priceLines = lines.filter(l => /[¥￥]/.test(l) || /^\d{2,5}$/.test(l));
+    console.log(`[parseAppleReceipt] 金額を含む行:`);
+    priceLines.forEach(l => console.log(`  - "${l}"`));
+  }
 
   let currentApp = '';
   let currentItem = '';
@@ -524,7 +528,9 @@ const parseAppleReceipt = (body: string): AppleAppPurchase[] => {
 
     // App Storeセクションの開始を検出
     if (/^App\s*Store$/i.test(line)) {
-      console.log(`[parseAppleReceipt] App Storeセクション開始`);
+      if (__DEV__) {
+        console.log(`[parseAppleReceipt] App Storeセクション開始`);
+      }
       continue;
     }
 
@@ -549,7 +555,9 @@ const parseAppleReceipt = (body: string): AppleAppPurchase[] => {
         const isSubscription = isSubscriptionPayment(contextText);
         const billingCycle = extractBillingCycle(contextText);
 
-        console.log(`[parseAppleReceipt] ✓ 検出: ${currentApp} - ¥${price} (${isSubscription ? 'サブスク' : '課金'})`);
+        if (__DEV__) {
+          console.log(`[parseAppleReceipt] ✓ 検出: ${currentApp} - ¥${price} (${isSubscription ? 'サブスク' : '課金'})`);
+        }
 
         purchases.push({
           appName: currentApp,
@@ -588,17 +596,23 @@ const parseAppleReceipt = (body: string): AppleAppPurchase[] => {
       // アイテム名っぽい行（大文字英語や「月額」「アプリ内課金」を含む）
       if (/[A-Z]{2,}|月額|年額|アプリ内課金|Pass|Premium|Plus|Pro|Upgrade/i.test(line)) {
         currentItem = line;
-        console.log(`[parseAppleReceipt] アイテム候補: "${line}"`);
+        if (__DEV__) {
+          console.log(`[parseAppleReceipt] アイテム候補: "${line}"`);
+        }
       } else if (!currentApp || currentItem) {
         // 新しいアプリ名
         currentApp = line;
         currentItem = '';
-        console.log(`[parseAppleReceipt] アプリ名候補: "${line}"`);
+        if (__DEV__) {
+          console.log(`[parseAppleReceipt] アプリ名候補: "${line}"`);
+        }
       }
     }
   }
 
-  console.log(`[parseAppleReceipt] 検出結果: ${purchases.length}件`);
+  if (__DEV__) {
+    console.log(`[parseAppleReceipt] 検出結果: ${purchases.length}件`);
+  }
   return purchases;
 };
 

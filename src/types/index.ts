@@ -78,6 +78,7 @@ export interface PopularService {
   defaultPrice?: number;
   defaultCurrency?: string;
   defaultBillingCycle?: BillingCycle;
+  requiresManualEntry?: boolean; // メールで自動検出できないサービス
 }
 
 export interface AppSettings {
@@ -85,15 +86,21 @@ export interface AppSettings {
   currency: string;
   language: string;
   monthlyBudget?: number;
+  notificationsEnabled?: boolean;
+  notificationDaysBefore?: number; // 何日前に通知するか
+  hasSeenOnboarding?: boolean;
 }
 
 export type RootStackParamList = {
   Main: undefined;
+  Onboarding: undefined;
   SubscriptionDetail: { subscriptionId: string };
   AddSubscription: { presetService?: PopularService } | undefined;
   EditSubscription: { subscriptionId: string };
   ScanEmail: undefined;
   PaymentHistory: undefined;
+  PrivacyPolicy: undefined;
+  TermsOfService: undefined;
 };
 
 export type MainTabParamList = {

@@ -45,7 +45,9 @@ export const signOutGoogle = async () => {
   try {
     await GoogleSignin.signOut();
   } catch (error) {
-    console.error('Sign out error:', error);
+    if (__DEV__) {
+      console.error('Sign out error:', error);
+    }
   }
 };
 

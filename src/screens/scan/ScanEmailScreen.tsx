@@ -18,8 +18,14 @@ import { MMKV } from 'react-native-mmkv';
 import { useTheme } from '../../hooks/useTheme';
 import { useSubscriptionStore } from '../../stores/subscriptionStore';
 
-// 認証情報保存用ストレージ
-const credentialsStorage = new MMKV({ id: 'credentials-storage' });
+// 認証情報保存用ストレージ（暗号化有効）
+// 注意: より安全な実装にはreact-native-keychainの使用を推奨
+// この暗号化キーはアプリ固有のもので、認証情報の平文保存を防ぎます
+const CREDENTIALS_ENCRYPTION_KEY = 'sub-mgr-cred-2025';
+const credentialsStorage = new MMKV({
+  id: 'credentials-storage',
+  encryptionKey: CREDENTIALS_ENCRYPTION_KEY,
+});
 import {
   configureGoogleSignIn,
   signInWithGoogle,
@@ -70,11 +76,25 @@ export default function ScanEmailScreen() {
   const [showPassword, setShowPassword] = useState(false);
   const [hasSavedCredentials, setHasSavedCredentials] = useState(false);
 
+  const [autoScanTriggered, setAutoScanTriggered] = useState(false);
+
   useEffect(() => {
     configureGoogleSignIn();
     checkCurrentUser();
     loadSavedCredentials();
   }, []);
+
+  // 保存された認証情報がある場合は自動スキャン
+  useEffect(() => {
+    if (hasSavedCredentials && !autoScanTriggered && status === 'idle' && icloudEmail && icloudAppPassword) {
+      setAutoScanTriggered(true);
+      // 少し遅延を入れてUIが表示されてからスキャン開始
+      const timer = setTimeout(() => {
+        handleICloudScanAuto();
+      }, 500);
+      return () => clearTimeout(timer);
+    }
+  }, [hasSavedCredentials, autoScanTriggered, status, icloudEmail, icloudAppPassword]);
 
   const loadSavedCredentials = () => {
     const savedEmail = credentialsStorage.getString('icloud_email');
@@ -124,12 +144,13 @@ export default function ScanEmailScreen() {
         (fetched) => setProgress({ current: fetched, total: 0 }),
       );
 
-      console.log('========================================');
-      console.log(`[SCAN] 取得したメール数: ${messages.length}件`);
-      console.log('========================================');
-
-      // デバッグ用Alert
-      Alert.alert('デバッグ', `取得したメール: ${messages.length}件`);
+      if (__DEV__) {
+        console.log('========================================');
+        console.log(`[SCAN] 取得したメール数: ${messages.length}件`);
+        console.log('========================================');
+        // デバッグ用Alert
+        Alert.alert('デバッグ', `取得したメール: ${messages.length}件`);
+      }
 
       if (messages.length === 0) {
         setStatus('done');
@@ -146,8 +167,10 @@ export default function ScanEmailScreen() {
         (current, total) => setProgress({ current, total }),
       );
 
-      // デバッグ: メールの送信者と件名をログ出力
-      console.log('\n[SCAN] メール一覧:');
+      // デバッグ: メールの送信者と件名をログ出力（開発環境のみ）
+      if (__DEV__) {
+        console.log('\n[SCAN] メール一覧:');
+      }
       const appleEmails: typeof emailDetails = [];
       const otherPaymentEmails: typeof emailDetails = [];
 
@@ -161,43 +184,51 @@ export default function ScanEmailScreen() {
 
         if (isApple) {
           appleEmails.push(email);
-          console.log(`  📱 [Apple] ${subject}`);
-          if (isReceipt) {
-            console.log(`      ↳ 領収書メール ✓`);
+          if (__DEV__) {
+            console.log(`  📱 [Apple] ${subject}`);
+            if (isReceipt) {
+              console.log(`      ↳ 領収書メール ✓`);
+            }
           }
         } else if (/payment|receipt|invoice|請求|領収|支払|購入|注文/i.test(subject)) {
           otherPaymentEmails.push(email);
-          console.log(`  💳 [課金] ${subject} (from: ${from.substring(0, 50)})`);
+          if (__DEV__) {
+            console.log(`  💳 [課金] ${subject} (from: ${from.substring(0, 50)})`);
+          }
         }
       }
 
-      console.log('\n----------------------------------------');
-      console.log(`[SCAN] Appleからのメール: ${appleEmails.length}件`);
-      console.log(`[SCAN] その他の課金メール: ${otherPaymentEmails.length}件`);
-      console.log('----------------------------------------\n');
+      if (__DEV__) {
+        console.log('\n----------------------------------------');
+        console.log(`[SCAN] Appleからのメール: ${appleEmails.length}件`);
+        console.log(`[SCAN] その他の課金メール: ${otherPaymentEmails.length}件`);
+        console.log('----------------------------------------\n');
 
-      // Apple領収書の詳細をログ出力（最初の3件）
-      if (appleEmails.length > 0) {
-        console.log('[SCAN] Apple領収書の内容サンプル:');
-        for (let i = 0; i < Math.min(3, appleEmails.length); i++) {
-          const email = appleEmails[i];
-          const subject = email.payload?.headers?.find(h => h.name.toLowerCase() === 'subject')?.value || '';
-          const body = extractEmailBodyForLog(email);
-          console.log(`\n--- Apple領収書 #${i + 1}: ${subject} ---`);
-          console.log(body.substring(0, 1500)); // 最初の1500文字
-          console.log('--- END ---\n');
+        // Apple領収書の詳細をログ出力（最初の3件）
+        if (appleEmails.length > 0) {
+          console.log('[SCAN] Apple領収書の内容サンプル:');
+          for (let i = 0; i < Math.min(3, appleEmails.length); i++) {
+            const email = appleEmails[i];
+            const subject = email.payload?.headers?.find(h => h.name.toLowerCase() === 'subject')?.value || '';
+            const body = extractEmailBodyForLog(email);
+            console.log(`\n--- Apple領収書 #${i + 1}: ${subject} ---`);
+            console.log(body.substring(0, 1500)); // 最初の1500文字
+            console.log('--- END ---\n');
+          }
         }
       }
 
       setStatus('parsing');
       const detected = parseMultipleEmails(emailDetails);
 
-      console.log('\n========================================');
-      console.log(`[SCAN] 検出されたサブスク/課金: ${detected.length}件`);
-      for (const d of detected) {
-        console.log(`  - ${d.name}: ${d.price ?? '金額不明'} ${d.currency || ''} (${d.type})`);
+      if (__DEV__) {
+        console.log('\n========================================');
+        console.log(`[SCAN] 検出されたサブスク/課金: ${detected.length}件`);
+        for (const d of detected) {
+          console.log(`  - ${d.name}: ${d.price ?? '金額不明'} ${d.currency || ''} (${d.type})`);
+        }
+        console.log('========================================\n');
       }
-      console.log('========================================\n');
 
       const existingNames = new Set(subscriptions.map((s) => s.name.toLowerCase()));
       const newSubscriptions = detected.filter(
@@ -212,7 +243,9 @@ export default function ScanEmailScreen() {
         Alert.alert('結果', '検出されたサブスク・課金はすべて登録済みです');
       }
     } catch (error: any) {
-      console.error('[SCAN] エラー:', error);
+      if (__DEV__) {
+        console.error('[SCAN] エラー:', error);
+      }
       setStatus('error');
       setErrorMessage(error.message || 'スキャン中にエラーが発生しました');
     }
@@ -245,6 +278,54 @@ export default function ScanEmailScreen() {
         .trim();
     } catch {
       return '[本文の取得に失敗]';
+    }
+  };
+
+  // 自動スキャン用（Alertなし）
+  const handleICloudScanAuto = async () => {
+    if (!icloudEmail.trim() || !icloudAppPassword.trim()) {
+      return;
+    }
+
+    const credentials: ICloudCredentials = {
+      email: icloudEmail.trim(),
+      appPassword: icloudAppPassword.trim(),
+    };
+
+    setStatus('connecting');
+    setErrorMessage(null);
+    setDetectedSubscriptions([]);
+
+    try {
+      const testResult = await testICloudConnection(credentials);
+      if (!testResult.success) {
+        setStatus('error');
+        setErrorMessage(testResult.error || '接続に失敗しました');
+        return;
+      }
+
+      setUserEmail(icloudEmail);
+      setStatus('fetching');
+
+      const result = await fetchICloudSubscriptions(credentials, 300);
+
+      if (!result.success) {
+        setStatus('error');
+        setErrorMessage(result.error || 'メール取得に失敗しました');
+        return;
+      }
+
+      const existingNames = new Set(subscriptions.map((s) => s.name.toLowerCase()));
+      const newSubscriptions = result.subscriptions.filter(
+        (d) => !existingNames.has(d.name.toLowerCase()),
+      );
+
+      setDetectedSubscriptions(newSubscriptions);
+      setSelectedItems(new Set(newSubscriptions.map((s) => s.name)));
+      setStatus('done');
+    } catch (error: any) {
+      setStatus('error');
+      setErrorMessage(error.message || 'スキャン中にエラーが発生しました');
     }
   };
 

@@ -44,6 +44,9 @@ export const useSubscriptionStore = create<SubscriptionState>()(
         theme: 'system',
         currency: 'JPY',
         language: 'ja',
+        notificationsEnabled: false,
+        notificationDaysBefore: 1,
+        hasSeenOnboarding: false,
       },
 
       addSubscription: (subscriptionData) => {

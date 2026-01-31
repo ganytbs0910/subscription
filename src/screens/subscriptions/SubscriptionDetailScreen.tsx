@@ -66,6 +66,7 @@ export default function SubscriptionDetailScreen() {
     );
   }
 
+  const isPayment = subscription.type === 'payment';
   const daysUntil = getDaysUntilNextBilling(subscription.nextBillingDate);
   const monthlyEquivalent = getMonthlyAmount(
     subscription.price,
@@ -76,7 +77,7 @@ export default function SubscriptionDetailScreen() {
     subscription.billingCycle
   );
 
-  // コスト予測
+  // コスト予測（サブスクのみ）
   const forecast3m = monthlyEquivalent * 3;
   const forecast6m = monthlyEquivalent * 6;
   const forecast12m = monthlyEquivalent * 12;
@@ -134,74 +135,84 @@ export default function SubscriptionDetailScreen() {
         <Text style={styles.mainPrice}>
           {formatPrice(subscription.price, subscription.currency)}
         </Text>
-        <Text style={styles.billingCycle}>
-          / {getBillingCycleLabel(subscription.billingCycle)}
-        </Text>
+        {!isPayment && (
+          <Text style={styles.billingCycle}>
+            / {getBillingCycleLabel(subscription.billingCycle)}
+          </Text>
+        )}
       </View>
 
-      <View style={styles.statsRow}>
-        <View style={styles.statCard}>
-          <Text style={styles.statLabel}>月額換算</Text>
-          <Text style={styles.statValue}>
-            {formatPrice(monthlyEquivalent, subscription.currency)}
-          </Text>
+      {/* 月額/年額換算（サブスクのみ） */}
+      {!isPayment && (
+        <View style={styles.statsRow}>
+          <View style={styles.statCard}>
+            <Text style={styles.statLabel}>月額換算</Text>
+            <Text style={styles.statValue}>
+              {formatPrice(monthlyEquivalent, subscription.currency)}
+            </Text>
+          </View>
+          <View style={styles.statCard}>
+            <Text style={styles.statLabel}>年額換算</Text>
+            <Text style={styles.statValue}>
+              {formatPrice(yearlyEquivalent, subscription.currency)}
+            </Text>
+          </View>
         </View>
-        <View style={styles.statCard}>
-          <Text style={styles.statLabel}>年額換算</Text>
-          <Text style={styles.statValue}>
-            {formatPrice(yearlyEquivalent, subscription.currency)}
-          </Text>
-        </View>
-      </View>
+      )}
 
-      {/* コスト予測カード */}
-      <View style={styles.forecastSection}>
-        <Text style={styles.sectionTitle}>コスト予測</Text>
-        <View style={styles.forecastRow}>
-          <View style={styles.forecastCard}>
-            <Text style={styles.forecastLabel}>3ヶ月</Text>
-            <Text style={styles.forecastValue}>
-              {formatPrice(forecast3m, subscription.currency)}
-            </Text>
-          </View>
-          <View style={styles.forecastCard}>
-            <Text style={styles.forecastLabel}>6ヶ月</Text>
-            <Text style={styles.forecastValue}>
-              {formatPrice(forecast6m, subscription.currency)}
-            </Text>
-          </View>
-          <View style={styles.forecastCard}>
-            <Text style={styles.forecastLabel}>12ヶ月</Text>
-            <Text style={styles.forecastValue}>
-              {formatPrice(forecast12m, subscription.currency)}
-            </Text>
+      {/* コスト予測カード（サブスクのみ） */}
+      {!isPayment && (
+        <View style={styles.forecastSection}>
+          <Text style={styles.sectionTitle}>コスト予測</Text>
+          <View style={styles.forecastRow}>
+            <View style={styles.forecastCard}>
+              <Text style={styles.forecastLabel}>3ヶ月</Text>
+              <Text style={styles.forecastValue}>
+                {formatPrice(forecast3m, subscription.currency)}
+              </Text>
+            </View>
+            <View style={styles.forecastCard}>
+              <Text style={styles.forecastLabel}>6ヶ月</Text>
+              <Text style={styles.forecastValue}>
+                {formatPrice(forecast6m, subscription.currency)}
+              </Text>
+            </View>
+            <View style={styles.forecastCard}>
+              <Text style={styles.forecastLabel}>12ヶ月</Text>
+              <Text style={styles.forecastValue}>
+                {formatPrice(forecast12m, subscription.currency)}
+              </Text>
+            </View>
           </View>
         </View>
-      </View>
+      )}
 
       <View style={styles.detailSection}>
-        <View style={styles.detailRow}>
-          <View style={styles.detailIcon}>
-            <Icon name="calendar" size={20} color={theme.colors.primary} />
+        {/* 次回請求日（サブスクのみ） */}
+        {!isPayment && (
+          <View style={styles.detailRow}>
+            <View style={styles.detailIcon}>
+              <Icon name="calendar" size={20} color={theme.colors.primary} />
+            </View>
+            <View style={styles.detailContent}>
+              <Text style={styles.detailLabel}>次回請求日</Text>
+              <Text style={styles.detailValue}>
+                {formatDate(subscription.nextBillingDate)}
+                {daysUntil >= 0 && (
+                  <Text
+                    style={[
+                      styles.daysUntil,
+                      daysUntil <= 3 && { color: theme.colors.error },
+                    ]}
+                  >
+                    {' '}
+                    ({daysUntil === 0 ? '今日' : `${daysUntil}日後`})
+                  </Text>
+                )}
+              </Text>
+            </View>
           </View>
-          <View style={styles.detailContent}>
-            <Text style={styles.detailLabel}>次回請求日</Text>
-            <Text style={styles.detailValue}>
-              {formatDate(subscription.nextBillingDate)}
-              {daysUntil >= 0 && (
-                <Text
-                  style={[
-                    styles.daysUntil,
-                    daysUntil <= 3 && { color: theme.colors.error },
-                  ]}
-                >
-                  {' '}
-                  ({daysUntil === 0 ? '今日' : `${daysUntil}日後`})
-                </Text>
-              )}
-            </Text>
-          </View>
-        </View>
+        )}
 
         <View style={styles.detailRow}>
           <View style={styles.detailIcon}>
@@ -218,15 +229,15 @@ export default function SubscriptionDetailScreen() {
         <View style={styles.detailRow}>
           <View style={styles.detailIcon}>
             <Icon
-              name={subscription.isActive ? 'check-circle' : 'pause-circle'}
+              name={isPayment ? 'cash' : (subscription.isActive ? 'check-circle' : 'pause-circle')}
               size={20}
-              color={subscription.isActive ? theme.colors.success : theme.colors.error}
+              color={isPayment ? theme.colors.primary : (subscription.isActive ? theme.colors.success : theme.colors.error)}
             />
           </View>
           <View style={styles.detailContent}>
-            <Text style={styles.detailLabel}>ステータス</Text>
+            <Text style={styles.detailLabel}>タイプ</Text>
             <Text style={styles.detailValue}>
-              {subscription.isActive ? '有効' : '停止中'}
+              {isPayment ? '買い切り課金' : (subscription.isActive ? '契約中' : '解約済み')}
             </Text>
           </View>
         </View>
@@ -303,19 +314,22 @@ export default function SubscriptionDetailScreen() {
           </Text>
         </TouchableOpacity>
 
-        <TouchableOpacity
-          style={[styles.actionButton, styles.toggleButton]}
-          onPress={handleToggleActive}
-        >
-          <Icon
-            name={subscription.isActive ? 'pause' : 'play'}
-            size={20}
-            color={theme.colors.primary}
-          />
-          <Text style={[styles.actionButtonText, { color: theme.colors.primary }]}>
-            {subscription.isActive ? '停止する' : '再開する'}
-          </Text>
-        </TouchableOpacity>
+        {/* 停止/再開ボタン（サブスクのみ） */}
+        {!isPayment && (
+          <TouchableOpacity
+            style={[styles.actionButton, styles.toggleButton]}
+            onPress={handleToggleActive}
+          >
+            <Icon
+              name={subscription.isActive ? 'pause' : 'play'}
+              size={20}
+              color={theme.colors.primary}
+            />
+            <Text style={[styles.actionButtonText, { color: theme.colors.primary }]}>
+              {subscription.isActive ? '停止する' : '再開する'}
+            </Text>
+          </TouchableOpacity>
+        )}
 
         <TouchableOpacity
           style={[styles.actionButton, styles.deleteButton]}

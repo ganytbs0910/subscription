@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -7,13 +7,22 @@ import {
   TouchableOpacity,
   Dimensions,
   RefreshControl,
+  ActivityIndicator,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
+import { MMKV } from 'react-native-mmkv';
 
 import { useTheme } from '../../hooks/useTheme';
 import { useSubscriptionStore } from '../../stores/subscriptionStore';
+import {
+  testICloudConnection,
+  fetchICloudSubscriptions,
+  ICloudCredentials,
+} from '../../services/icloudService';
+
+const credentialsStorage = new MMKV({ id: 'credentials-storage' });
 import {
   calculateTotalMonthly,
   calculateTotalYearly,
@@ -36,8 +45,133 @@ const { width } = Dimensions.get('window');
 export default function DashboardScreen() {
   const theme = useTheme();
   const navigation = useNavigation<NavigationProp>();
-  const { subscriptions, settings } = useSubscriptionStore();
+  const { subscriptions, settings, addSubscription } = useSubscriptionStore();
   const [refreshing, setRefreshing] = useState(false);
+  const [autoScanStatus, setAutoScanStatus] = useState<'idle' | 'scanning' | 'done'>('idle');
+  const [newItemsCount, setNewItemsCount] = useState(0);
+  const hasAutoScanned = useRef(false);
+
+  // アプリ起動時の自動スキャン
+  useEffect(() => {
+    if (hasAutoScanned.current) return;
+
+    const savedEmail = credentialsStorage.getString('icloud_email');
+    const savedPassword = credentialsStorage.getString('icloud_password');
+
+    if (savedEmail && savedPassword) {
+      hasAutoScanned.current = true;
+      runAutoScan(savedEmail, savedPassword);
+    }
+  }, []);
+
+  const runAutoScan = async (email: string, password: string) => {
+    setAutoScanStatus('scanning');
+
+    try {
+      const credentials: ICloudCredentials = { email, appPassword: password };
+      const testResult = await testICloudConnection(credentials);
+
+      if (!testResult.success) {
+        setAutoScanStatus('idle');
+        return;
+      }
+
+      const result = await fetchICloudSubscriptions(credentials, 300);
+
+      if (!result.success || !result.subscriptions) {
+        setAutoScanStatus('idle');
+        return;
+      }
+
+      const existingNames = new Set(subscriptions.map((s) => s.name.toLowerCase()));
+      const newSubscriptions = result.subscriptions.filter(
+        (d) => !existingNames.has(d.name.toLowerCase()),
+      );
+
+      // 新しいサブスク・課金を自動追加
+      for (const sub of newSubscriptions) {
+        const now = new Date();
+        const nextMonth = new Date(now.getFullYear(), now.getMonth() + 1, now.getDate());
+
+        let startDate = now.toISOString();
+        if (sub.paymentHistory && sub.paymentHistory.length > 0) {
+          const sortedHistory = [...sub.paymentHistory].sort(
+            (a, b) => new Date(a.date).getTime() - new Date(b.date).getTime()
+          );
+          startDate = sortedHistory[0].date;
+        }
+
+        const paymentHistory: { date: string; price: number; currency: string; subject?: string; itemName?: string }[] = [];
+        if (sub.subItems && sub.subItems.length > 0) {
+          for (const item of sub.subItems) {
+            for (const purchase of item.purchases) {
+              paymentHistory.push({
+                date: purchase.date,
+                price: purchase.price,
+                currency: item.currency,
+                itemName: item.name,
+              });
+            }
+          }
+          paymentHistory.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+        } else if (sub.paymentHistory) {
+          for (const h of sub.paymentHistory) {
+            paymentHistory.push({
+              date: h.date,
+              price: h.price,
+              currency: h.currency,
+              subject: h.subject,
+            });
+          }
+        }
+
+        const subItems = sub.subItems?.map(item => ({
+          name: item.name,
+          currency: item.currency,
+          purchases: item.purchases.map(p => ({ date: p.date, price: p.price })),
+          totalPaid: item.totalPaid,
+        }));
+
+        let isActive = true;
+        if (sub.type === 'subscription' && paymentHistory.length > 0) {
+          const lastPaymentDate = new Date(paymentHistory[0].date);
+          const nowDate = new Date();
+          const cycle = sub.billingCycle || 'monthly';
+          const monthsDiff =
+            (nowDate.getFullYear() - lastPaymentDate.getFullYear()) * 12 +
+            (nowDate.getMonth() - lastPaymentDate.getMonth());
+
+          if (cycle === 'monthly') isActive = monthsDiff <= 1;
+          else if (cycle === 'yearly') isActive = monthsDiff <= 12;
+          else if (cycle === 'quarterly') isActive = monthsDiff <= 3;
+          else if (cycle === 'weekly') {
+            const daysDiff = Math.floor((nowDate.getTime() - lastPaymentDate.getTime()) / (1000 * 60 * 60 * 24));
+            isActive = daysDiff <= 14;
+          }
+        }
+
+        addSubscription({
+          name: sub.name,
+          price: sub.price || 0,
+          currency: sub.currency || 'JPY',
+          billingCycle: sub.billingCycle || 'monthly',
+          category: sub.category,
+          nextBillingDate: nextMonth.toISOString(),
+          startDate,
+          isActive,
+          type: sub.type,
+          paymentHistory,
+          totalPaidFromEmail: sub.totalPaid,
+          subItems,
+        });
+      }
+
+      setNewItemsCount(newSubscriptions.length);
+      setAutoScanStatus('done');
+    } catch (error) {
+      setAutoScanStatus('idle');
+    }
+  };
 
   const onRefresh = useCallback(() => {
     setRefreshing(true);
@@ -45,9 +179,11 @@ export default function DashboardScreen() {
   }, []);
 
   const activeSubscriptions = subscriptions.filter((sub) => sub.isActive);
-  const monthlyTotal = calculateTotalMonthly(activeSubscriptions);
-  const yearlyTotal = calculateTotalYearly(activeSubscriptions);
-  const upcomingPayments = getUpcomingSubscriptions(activeSubscriptions, 14);
+  // サブスクのみ（課金を除外）
+  const activeSubscriptionsOnly = activeSubscriptions.filter((sub) => sub.type !== 'payment');
+  const monthlyTotal = calculateTotalMonthly(activeSubscriptionsOnly);
+  const yearlyTotal = calculateTotalYearly(activeSubscriptionsOnly);
+  const upcomingPayments = getUpcomingSubscriptions(activeSubscriptionsOnly, 14);
 
   // 前月比トレンド
   const trend = compareWithLastMonth(subscriptions);
@@ -78,6 +214,31 @@ export default function DashboardScreen() {
         <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
       }
     >
+      {/* 自動スキャン中バナー */}
+      {autoScanStatus === 'scanning' && (
+        <View style={styles.scanBanner}>
+          <ActivityIndicator size="small" color="#FFFFFF" />
+          <Text style={styles.scanBannerText}>メールをスキャン中...</Text>
+        </View>
+      )}
+
+      {/* 新規検出バナー */}
+      {autoScanStatus === 'done' && newItemsCount > 0 && (
+        <TouchableOpacity
+          style={styles.newItemsBanner}
+          onPress={() => {
+            setAutoScanStatus('idle');
+            setNewItemsCount(0);
+          }}
+        >
+          <Icon name="check-circle" size={20} color="#FFFFFF" />
+          <Text style={styles.newItemsBannerText}>
+            {newItemsCount}件の新しいサブスク・課金を追加しました
+          </Text>
+          <Icon name="close" size={18} color="#FFFFFF" />
+        </TouchableOpacity>
+      )}
+
       {/* メインカード - 月額合計 */}
       <TouchableOpacity
         style={styles.mainCard}
@@ -109,7 +270,7 @@ export default function DashboardScreen() {
         <View style={styles.mainCardDivider} />
         <View style={styles.mainCardRow}>
           <View style={styles.mainCardStat}>
-            <Text style={styles.mainCardStatValue}>{activeSubscriptions.length}</Text>
+            <Text style={styles.mainCardStatValue}>{activeSubscriptionsOnly.length}</Text>
             <Text style={styles.mainCardStatLabel}>契約中</Text>
           </View>
           <View style={styles.mainCardStatDivider} />
@@ -171,7 +332,7 @@ export default function DashboardScreen() {
           <View style={[styles.quickActionIcon, { backgroundColor: '#E8F5E9' }]}>
             <Icon name="plus" size={22} color="#388E3C" />
           </View>
-          <Text style={styles.quickActionText}>サブスク{'\n'}追加</Text>
+          <Text style={styles.quickActionText}>手動で{'\n'}追加</Text>
         </TouchableOpacity>
 
         <TouchableOpacity
@@ -359,6 +520,35 @@ const createStyles = (theme: ReturnType<typeof useTheme>) =>
     container: {
       flex: 1,
       backgroundColor: theme.colors.background,
+    },
+    scanBanner: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: theme.colors.primary,
+      paddingVertical: 12,
+      paddingHorizontal: 16,
+      gap: 8,
+    },
+    scanBannerText: {
+      color: '#FFFFFF',
+      fontSize: 14,
+      fontWeight: '600',
+    },
+    newItemsBanner: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: '#34C759',
+      paddingVertical: 12,
+      paddingHorizontal: 16,
+      gap: 8,
+    },
+    newItemsBannerText: {
+      flex: 1,
+      color: '#FFFFFF',
+      fontSize: 14,
+      fontWeight: '600',
     },
     mainCard: {
       backgroundColor: theme.colors.primary,
