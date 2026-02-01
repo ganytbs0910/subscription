@@ -44,7 +44,12 @@
       "Bash(npm run start:*)",
       "Bash(ls:*)",
       "Bash(python3:*)",
-      "Bash(wc:*)"
+      "Bash(wc:*)",
+      "Bash(chmod:*)",
+      "Bash(xcrun simctl io:*)",
+      "Bash(for f in promo-images/promo_*.png)",
+      "Bash(done)",
+      "Bash(for f in promo-images/ipad_promo_*.png)"
     ]
   }
 }

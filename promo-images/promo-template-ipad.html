@@ -1,0 +1,746 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>App Store Promo Images - iPad</title>
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700;900&display=swap" rel="stylesheet">
+  <link href="https://cdn.jsdelivr.net/npm/@mdi/font@7.4.47/css/materialdesignicons.min.css" rel="stylesheet">
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: 'Noto Sans JP', -apple-system, BlinkMacSystemFont, sans-serif;
+      background: #1a1a2e;
+      padding: 40px;
+    }
+
+    .promo-grid {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 40px;
+      justify-content: center;
+    }
+
+    /* iPad 12.9インチ: 2048 x 2732 px → 1/3スケール: 683 x 911 */
+    .promo-card {
+      width: 683px;
+      height: 911px;
+      border-radius: 30px;
+      position: relative;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 50px 40px 40px;
+    }
+
+    /* グラデーション背景 */
+    .promo-card.gradient-1 {
+      background: linear-gradient(180deg, #667eea 0%, #764ba2 100%);
+    }
+    .promo-card.gradient-2 {
+      background: linear-gradient(180deg, #f093fb 0%, #f5576c 100%);
+    }
+    .promo-card.gradient-3 {
+      background: linear-gradient(180deg, #4facfe 0%, #00f2fe 100%);
+    }
+    .promo-card.gradient-4 {
+      background: linear-gradient(180deg, #43e97b 0%, #38f9d7 100%);
+    }
+    .promo-card.gradient-5 {
+      background: linear-gradient(180deg, #fa709a 0%, #fee140 100%);
+    }
+
+    .headline {
+      color: white;
+      font-size: 42px;
+      font-weight: 900;
+      text-align: center;
+      line-height: 1.3;
+      margin-bottom: 12px;
+      text-shadow: 0 2px 10px rgba(0,0,0,0.2);
+    }
+
+    .subheadline {
+      color: rgba(255,255,255,0.9);
+      font-size: 20px;
+      font-weight: 500;
+      text-align: center;
+      margin-bottom: 30px;
+    }
+
+    /* iPad フレーム */
+    .ipad-frame {
+      width: 520px;
+      height: 680px;
+      background: #1a1a1a;
+      border-radius: 30px;
+      padding: 20px;
+      box-shadow: 0 25px 80px rgba(0,0,0,0.4);
+      position: relative;
+    }
+
+    .ipad-screen {
+      width: 100%;
+      height: 100%;
+      background: #f5f5f7;
+      border-radius: 12px;
+      overflow: hidden;
+      position: relative;
+    }
+
+    /* ダミースクリーン */
+    .screen-content {
+      width: 100%;
+      height: 100%;
+      padding: 20px;
+      background: linear-gradient(180deg, #f8f9fa 0%, #ffffff 100%);
+    }
+
+    .screen-header {
+      text-align: center;
+      margin-bottom: 20px;
+      padding-top: 10px;
+    }
+
+    .screen-title {
+      font-size: 18px;
+      color: #333;
+      font-weight: 600;
+    }
+
+    .dashboard-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 15px;
+    }
+
+    .total-card {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      border-radius: 16px;
+      padding: 20px;
+      color: white;
+      grid-column: span 2;
+    }
+
+    .total-label {
+      font-size: 12px;
+      opacity: 0.8;
+      margin-bottom: 5px;
+    }
+
+    .total-amount {
+      font-size: 36px;
+      font-weight: 700;
+    }
+
+    .total-unit {
+      font-size: 16px;
+      opacity: 0.8;
+    }
+
+    .stats-card {
+      background: white;
+      border-radius: 16px;
+      padding: 15px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+    }
+
+    .stats-label {
+      font-size: 11px;
+      color: #888;
+      margin-bottom: 5px;
+    }
+
+    .stats-value {
+      font-size: 22px;
+      font-weight: 700;
+      color: #333;
+    }
+
+    .sub-list {
+      grid-column: span 2;
+    }
+
+    .sub-item {
+      display: flex;
+      align-items: center;
+      background: white;
+      border-radius: 12px;
+      padding: 12px 15px;
+      margin-bottom: 10px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+    }
+
+    .sub-icon {
+      width: 44px;
+      height: 44px;
+      border-radius: 12px;
+      margin-right: 15px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: white;
+      font-size: 20px;
+      font-weight: 700;
+    }
+
+    .sub-icon.netflix { background: #E50914; }
+    .sub-icon.spotify { background: #1DB954; }
+    .sub-icon.youtube { background: #FF0000; }
+    .sub-icon.icloud { background: #3693F3; }
+    .sub-icon.chatgpt { background: #10A37F; }
+
+    .sub-info {
+      flex: 1;
+    }
+
+    .sub-name {
+      font-size: 15px;
+      font-weight: 600;
+      color: #333;
+    }
+
+    .sub-cycle {
+      font-size: 12px;
+      color: #888;
+    }
+
+    .sub-price {
+      font-size: 16px;
+      font-weight: 700;
+      color: #333;
+    }
+
+    .tab-bar {
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      height: 60px;
+      background: white;
+      border-top: 1px solid #eee;
+      display: flex;
+      justify-content: space-around;
+      align-items: center;
+    }
+
+    .tab-item {
+      text-align: center;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+
+    .tab-icon {
+      font-size: 24px;
+      color: #999;
+      line-height: 1;
+    }
+
+    .tab-icon.active {
+      color: #667eea;
+    }
+
+    .tab-label {
+      font-size: 10px;
+      color: #888;
+      margin-top: 3px;
+    }
+
+    .tab-label.active {
+      color: #667eea;
+    }
+
+    /* 機能バッジ */
+    .feature-badges {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      justify-content: center;
+      margin-top: auto;
+      padding-top: 25px;
+    }
+
+    .badge {
+      background: rgba(255,255,255,0.2);
+      color: white;
+      padding: 10px 20px;
+      border-radius: 20px;
+      font-size: 14px;
+      font-weight: 500;
+      backdrop-filter: blur(10px);
+    }
+  </style>
+</head>
+<body>
+  <div class="promo-grid">
+
+    <!-- プロモ画像 1: メイン -->
+    <div class="promo-card gradient-1">
+      <h1 class="headline">サブスクを<br>まとめて管理</h1>
+      <p class="subheadline">毎月の支出がひと目でわかる</p>
+
+      <div class="ipad-frame">
+        <div class="ipad-screen">
+          <div class="screen-content">
+            <div class="screen-header">
+              <div class="screen-title">ダッシュボード</div>
+            </div>
+
+            <div class="dashboard-grid">
+              <div class="total-card">
+                <div class="total-label">今月の合計</div>
+                <div class="total-amount">¥8,850<span class="total-unit">/月</span></div>
+              </div>
+
+              <div class="stats-card">
+                <div class="stats-label">年間予想</div>
+                <div class="stats-value">¥106,200</div>
+              </div>
+
+              <div class="stats-card">
+                <div class="stats-label">登録数</div>
+                <div class="stats-value">6件</div>
+              </div>
+
+              <div class="sub-list">
+                <div class="sub-item">
+                  <div class="sub-icon netflix">N</div>
+                  <div class="sub-info">
+                    <div class="sub-name">Netflix</div>
+                    <div class="sub-cycle">月額</div>
+                  </div>
+                  <div class="sub-price">¥1,490</div>
+                </div>
+
+                <div class="sub-item">
+                  <div class="sub-icon spotify">S</div>
+                  <div class="sub-info">
+                    <div class="sub-name">Spotify</div>
+                    <div class="sub-cycle">月額</div>
+                  </div>
+                  <div class="sub-price">¥980</div>
+                </div>
+
+                <div class="sub-item">
+                  <div class="sub-icon youtube">Y</div>
+                  <div class="sub-info">
+                    <div class="sub-name">YouTube Premium</div>
+                    <div class="sub-cycle">月額</div>
+                  </div>
+                  <div class="sub-price">¥1,280</div>
+                </div>
+
+                <div class="sub-item">
+                  <div class="sub-icon chatgpt">G</div>
+                  <div class="sub-info">
+                    <div class="sub-name">ChatGPT Plus</div>
+                    <div class="sub-cycle">月額</div>
+                  </div>
+                  <div class="sub-price">¥3,000</div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="tab-bar">
+            <div class="tab-item">
+              <i class="mdi mdi-view-dashboard tab-icon active"></i>
+              <div class="tab-label active">ダッシュボード</div>
+            </div>
+            <div class="tab-item">
+              <i class="mdi mdi-format-list-bulleted tab-icon"></i>
+              <div class="tab-label">サブスク</div>
+            </div>
+            <div class="tab-item">
+              <i class="mdi mdi-lightbulb-outline tab-icon"></i>
+              <div class="tab-label">インサイト</div>
+            </div>
+            <div class="tab-item">
+              <i class="mdi mdi-receipt tab-icon"></i>
+              <div class="tab-label">課金履歴</div>
+            </div>
+            <div class="tab-item">
+              <i class="mdi mdi-cog tab-icon"></i>
+              <div class="tab-label">設定</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="feature-badges">
+        <span class="badge">無料</span>
+        <span class="badge">シンプル</span>
+      </div>
+    </div>
+
+    <!-- プロモ画像 2: 自動検出 -->
+    <div class="promo-card gradient-2">
+      <h1 class="headline">メールから<br>自動で検出</h1>
+      <p class="subheadline">iCloudの課金を自動登録</p>
+
+      <div class="ipad-frame">
+        <div class="ipad-screen">
+          <div class="screen-content" style="background: linear-gradient(180deg, #fff5f5 0%, #ffffff 100%);">
+            <div class="screen-header">
+              <div class="screen-title">メールスキャン</div>
+            </div>
+
+            <div style="text-align: center; padding: 30px 0;">
+              <i class="mdi mdi-email-search" style="font-size: 80px; color: #f5576c;"></i>
+              <div style="font-size: 18px; color: #333; font-weight: 600; margin-bottom: 10px; margin-top: 20px;">
+                3件のサブスクを検出
+              </div>
+              <div style="font-size: 14px; color: #888;">
+                Apple経由の課金を自動取得
+              </div>
+            </div>
+
+            <div class="sub-item" style="border-left: 4px solid #34C759;">
+              <div class="sub-icon" style="background: #FC3C44;"><i class="mdi mdi-music-note"></i></div>
+              <div class="sub-info">
+                <div class="sub-name">Apple Music</div>
+                <div class="sub-cycle" style="color: #34C759;">新規検出</div>
+              </div>
+              <div class="sub-price">¥1,080</div>
+            </div>
+
+            <div class="sub-item" style="border-left: 4px solid #34C759;">
+              <div class="sub-icon icloud"><i class="mdi mdi-cloud"></i></div>
+              <div class="sub-info">
+                <div class="sub-name">iCloud+ 50GB</div>
+                <div class="sub-cycle" style="color: #34C759;">新規検出</div>
+              </div>
+              <div class="sub-price">¥130</div>
+            </div>
+
+            <div class="sub-item" style="border-left: 4px solid #34C759;">
+              <div class="sub-icon" style="background: #000;"><i class="mdi mdi-apple"></i></div>
+              <div class="sub-info">
+                <div class="sub-name">App Store 課金</div>
+                <div class="sub-cycle" style="color: #34C759;">新規検出</div>
+              </div>
+              <div class="sub-price">¥480</div>
+            </div>
+          </div>
+
+          <div class="tab-bar">
+            <div class="tab-item">
+              <i class="mdi mdi-view-dashboard tab-icon"></i>
+              <div class="tab-label">ダッシュボード</div>
+            </div>
+            <div class="tab-item">
+              <i class="mdi mdi-format-list-bulleted tab-icon"></i>
+              <div class="tab-label">サブスク</div>
+            </div>
+            <div class="tab-item">
+              <i class="mdi mdi-lightbulb-outline tab-icon"></i>
+              <div class="tab-label">インサイト</div>
+            </div>
+            <div class="tab-item">
+              <i class="mdi mdi-receipt tab-icon"></i>
+              <div class="tab-label">課金履歴</div>
+            </div>
+            <div class="tab-item">
+              <i class="mdi mdi-cog tab-icon"></i>
+              <div class="tab-label">設定</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="feature-badges">
+        <span class="badge">iCloud連携</span>
+        <span class="badge">自動取得</span>
+      </div>
+    </div>
+
+    <!-- プロモ画像 3: 通知 -->
+    <div class="promo-card gradient-3">
+      <h1 class="headline">更新日を<br>忘れない</h1>
+      <p class="subheadline">リマインダーでお知らせ</p>
+
+      <div class="ipad-frame">
+        <div class="ipad-screen">
+          <div class="screen-content" style="background: linear-gradient(180deg, #f0f8ff 0%, #ffffff 100%);">
+            <div class="screen-header">
+              <div class="screen-title">支払い予定</div>
+            </div>
+
+            <div style="background: #FFF3CD; border-radius: 16px; padding: 20px; margin-bottom: 20px; border-left: 4px solid #FFC107;">
+              <div style="font-size: 13px; color: #856404; font-weight: 600;">明日更新</div>
+              <div style="font-size: 18px; color: #333; font-weight: 600; margin-top: 5px;">Netflix の更新日です</div>
+            </div>
+
+            <div style="font-size: 14px; color: #888; margin-bottom: 15px; font-weight: 500;">今週の支払い</div>
+
+            <div class="sub-item">
+              <div class="sub-icon netflix">N</div>
+              <div class="sub-info">
+                <div class="sub-name">Netflix</div>
+                <div class="sub-cycle" style="color: #FF9500;">明日</div>
+              </div>
+              <div class="sub-price">¥1,490</div>
+            </div>
+
+            <div class="sub-item">
+              <div class="sub-icon spotify">S</div>
+              <div class="sub-info">
+                <div class="sub-name">Spotify</div>
+                <div class="sub-cycle">2月5日</div>
+              </div>
+              <div class="sub-price">¥980</div>
+            </div>
+
+            <div class="sub-item">
+              <div class="sub-icon chatgpt">G</div>
+              <div class="sub-info">
+                <div class="sub-name">ChatGPT Plus</div>
+                <div class="sub-cycle">2月7日</div>
+              </div>
+              <div class="sub-price">¥3,000</div>
+            </div>
+
+            <div class="sub-item">
+              <div class="sub-icon youtube">Y</div>
+              <div class="sub-info">
+                <div class="sub-name">YouTube Premium</div>
+                <div class="sub-cycle">2月10日</div>
+              </div>
+              <div class="sub-price">¥1,280</div>
+            </div>
+          </div>
+
+          <div class="tab-bar">
+            <div class="tab-item">
+              <i class="mdi mdi-view-dashboard tab-icon"></i>
+              <div class="tab-label">ダッシュボード</div>
+            </div>
+            <div class="tab-item">
+              <i class="mdi mdi-format-list-bulleted tab-icon active"></i>
+              <div class="tab-label active">サブスク</div>
+            </div>
+            <div class="tab-item">
+              <i class="mdi mdi-lightbulb-outline tab-icon"></i>
+              <div class="tab-label">インサイト</div>
+            </div>
+            <div class="tab-item">
+              <i class="mdi mdi-receipt tab-icon"></i>
+              <div class="tab-label">課金履歴</div>
+            </div>
+            <div class="tab-item">
+              <i class="mdi mdi-cog tab-icon"></i>
+              <div class="tab-label">設定</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="feature-badges">
+        <span class="badge">通知機能</span>
+        <span class="badge">解約忘れ防止</span>
+      </div>
+    </div>
+
+    <!-- プロモ画像 4: 分析 -->
+    <div class="promo-card gradient-4">
+      <h1 class="headline">年間支出を<br>見える化</h1>
+      <p class="subheadline">カテゴリ別に分析</p>
+
+      <div class="ipad-frame">
+        <div class="ipad-screen">
+          <div class="screen-content" style="background: linear-gradient(180deg, #f0fff4 0%, #ffffff 100%);">
+            <div class="screen-header">
+              <div class="screen-title">インサイト</div>
+            </div>
+
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-bottom: 20px;">
+              <div style="background: linear-gradient(135deg, #43e97b 0%, #38f9d7 100%); border-radius: 16px; padding: 20px; color: white;">
+                <div style="font-size: 12px; opacity: 0.8;">年間の予想支出</div>
+                <div style="font-size: 28px; font-weight: 700; margin-top: 5px;">¥106,200</div>
+              </div>
+              <div style="background: white; border-radius: 16px; padding: 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.08);">
+                <div style="font-size: 12px; color: #888;">月平均</div>
+                <div style="font-size: 28px; font-weight: 700; color: #333; margin-top: 5px;">¥8,850</div>
+              </div>
+            </div>
+
+            <div style="font-size: 14px; color: #888; margin-bottom: 15px; font-weight: 500;">カテゴリ別</div>
+
+            <div style="margin-bottom: 15px;">
+              <div style="display: flex; justify-content: space-between; font-size: 14px; margin-bottom: 6px;">
+                <span>動画配信</span>
+                <span style="font-weight: 600;">¥3,770</span>
+              </div>
+              <div style="height: 10px; background: #eee; border-radius: 5px; overflow: hidden;">
+                <div style="width: 45%; height: 100%; background: #E50914; border-radius: 5px;"></div>
+              </div>
+            </div>
+
+            <div style="margin-bottom: 15px;">
+              <div style="display: flex; justify-content: space-between; font-size: 14px; margin-bottom: 6px;">
+                <span>仕事効率化</span>
+                <span style="font-weight: 600;">¥3,000</span>
+              </div>
+              <div style="height: 10px; background: #eee; border-radius: 5px; overflow: hidden;">
+                <div style="width: 35%; height: 100%; background: #10A37F; border-radius: 5px;"></div>
+              </div>
+            </div>
+
+            <div style="margin-bottom: 15px;">
+              <div style="display: flex; justify-content: space-between; font-size: 14px; margin-bottom: 6px;">
+                <span>音楽</span>
+                <span style="font-weight: 600;">¥980</span>
+              </div>
+              <div style="height: 10px; background: #eee; border-radius: 5px; overflow: hidden;">
+                <div style="width: 12%; height: 100%; background: #1DB954; border-radius: 5px;"></div>
+              </div>
+            </div>
+
+            <div style="margin-bottom: 15px;">
+              <div style="display: flex; justify-content: space-between; font-size: 14px; margin-bottom: 6px;">
+                <span>クラウド</span>
+                <span style="font-weight: 600;">¥130</span>
+              </div>
+              <div style="height: 10px; background: #eee; border-radius: 5px; overflow: hidden;">
+                <div style="width: 5%; height: 100%; background: #3693F3; border-radius: 5px;"></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="tab-bar">
+            <div class="tab-item">
+              <i class="mdi mdi-view-dashboard tab-icon"></i>
+              <div class="tab-label">ダッシュボード</div>
+            </div>
+            <div class="tab-item">
+              <i class="mdi mdi-format-list-bulleted tab-icon"></i>
+              <div class="tab-label">サブスク</div>
+            </div>
+            <div class="tab-item">
+              <i class="mdi mdi-lightbulb-outline tab-icon active"></i>
+              <div class="tab-label active">インサイト</div>
+            </div>
+            <div class="tab-item">
+              <i class="mdi mdi-receipt tab-icon"></i>
+              <div class="tab-label">課金履歴</div>
+            </div>
+            <div class="tab-item">
+              <i class="mdi mdi-cog tab-icon"></i>
+              <div class="tab-label">設定</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="feature-badges">
+        <span class="badge">グラフ表示</span>
+        <span class="badge">節約提案</span>
+      </div>
+    </div>
+
+    <!-- プロモ画像 5: プライバシー -->
+    <div class="promo-card gradient-5">
+      <h1 class="headline">プライバシー<br>を守る</h1>
+      <p class="subheadline">データは端末内に保存</p>
+
+      <div class="ipad-frame">
+        <div class="ipad-screen">
+          <div class="screen-content" style="background: linear-gradient(180deg, #fff9f0 0%, #ffffff 100%);">
+            <div class="screen-header">
+              <div class="screen-title">設定</div>
+            </div>
+
+            <div style="text-align: center; padding: 25px 0;">
+              <i class="mdi mdi-shield-lock" style="font-size: 70px; color: #fa709a;"></i>
+              <div style="font-size: 18px; color: #333; font-weight: 600; margin-bottom: 5px; margin-top: 15px;">
+                あなたのデータは安全です
+              </div>
+              <div style="font-size: 14px; color: #888; line-height: 1.5;">
+                外部サーバーに送信されません
+              </div>
+            </div>
+
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px;">
+              <div style="background: #f8f9fa; border-radius: 16px; padding: 20px;">
+                <div style="display: flex; align-items: center; gap: 10px;">
+                  <i class="mdi mdi-check-circle" style="color: #34C759; font-size: 26px;"></i>
+                  <div>
+                    <div style="font-size: 14px; font-weight: 600; color: #333;">アカウント不要</div>
+                    <div style="font-size: 11px; color: #888;">登録なしで利用開始</div>
+                  </div>
+                </div>
+              </div>
+
+              <div style="background: #f8f9fa; border-radius: 16px; padding: 20px;">
+                <div style="display: flex; align-items: center; gap: 10px;">
+                  <i class="mdi mdi-check-circle" style="color: #34C759; font-size: 26px;"></i>
+                  <div>
+                    <div style="font-size: 14px; font-weight: 600; color: #333;">端末内に保存</div>
+                    <div style="font-size: 11px; color: #888;">クラウド送信なし</div>
+                  </div>
+                </div>
+              </div>
+
+              <div style="background: #f8f9fa; border-radius: 16px; padding: 20px;">
+                <div style="display: flex; align-items: center; gap: 10px;">
+                  <i class="mdi mdi-check-circle" style="color: #34C759; font-size: 26px;"></i>
+                  <div>
+                    <div style="font-size: 14px; font-weight: 600; color: #333;">オフライン対応</div>
+                    <div style="font-size: 11px; color: #888;">ネット接続不要</div>
+                  </div>
+                </div>
+              </div>
+
+              <div style="background: #f8f9fa; border-radius: 16px; padding: 20px;">
+                <div style="display: flex; align-items: center; gap: 10px;">
+                  <i class="mdi mdi-check-circle" style="color: #34C759; font-size: 26px;"></i>
+                  <div>
+                    <div style="font-size: 14px; font-weight: 600; color: #333;">シンプル設計</div>
+                    <div style="font-size: 11px; color: #888;">直感的な操作</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="tab-bar">
+            <div class="tab-item">
+              <i class="mdi mdi-view-dashboard tab-icon"></i>
+              <div class="tab-label">ダッシュボード</div>
+            </div>
+            <div class="tab-item">
+              <i class="mdi mdi-format-list-bulleted tab-icon"></i>
+              <div class="tab-label">サブスク</div>
+            </div>
+            <div class="tab-item">
+              <i class="mdi mdi-lightbulb-outline tab-icon"></i>
+              <div class="tab-label">インサイト</div>
+            </div>
+            <div class="tab-item">
+              <i class="mdi mdi-receipt tab-icon"></i>
+              <div class="tab-label">課金履歴</div>
+            </div>
+            <div class="tab-item">
+              <i class="mdi mdi-cog tab-icon active"></i>
+              <div class="tab-label active">設定</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="feature-badges">
+        <span class="badge">端末内保存</span>
+        <span class="badge">安心・安全</span>
+      </div>
+    </div>
+
+  </div>
+</body>
+</html>
