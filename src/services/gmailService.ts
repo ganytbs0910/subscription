@@ -23,28 +23,21 @@ export interface GmailMessageDetail {
 
 export const fetchSubscriptionEmails = async (
   accessToken: string,
-  maxResults?: number, // undefinedなら全件取得
+  maxResults?: number,
   onProgress?: (fetched: number) => void,
 ): Promise<GmailMessage[]> => {
   try {
-    // 課金メールを送る主要な送信者に絞って検索（効率重視）
     const query = encodeURIComponent(
-      'from:no_reply@email.apple.com OR ' +           // Apple
-      'from:googleplay-noreply@google.com OR ' +      // Google Play
-      'from:auto-confirm@amazon.co.jp OR ' +          // Amazon Japan
-      'from:digital-no-reply@amazon.co.jp'            // Amazon Digital
+      'from:no_reply@email.apple.com OR ' +
+      'from:googleplay-noreply@google.com OR ' +
+      'from:auto-confirm@amazon.co.jp OR ' +
+      'from:digital-no-reply@amazon.co.jp'
     );
 
     const allMessages: GmailMessage[] = [];
     let pageToken: string | undefined;
 
-    if (__DEV__) {
-      console.log('[Gmail] 検索クエリ:', decodeURIComponent(query).substring(0, 200) + '...');
-    }
-
-    // ページネーションで取得（maxResultsがundefinedなら全件）
     while (true) {
-      // 上限が設定されていて、既に達している場合は終了
       if (maxResults !== undefined && allMessages.length >= maxResults) {
         break;
       }
@@ -53,9 +46,6 @@ export const fetchSubscriptionEmails = async (
         ? `${GMAIL_API_BASE}/messages?q=${query}&maxResults=100&pageToken=${pageToken}`
         : `${GMAIL_API_BASE}/messages?q=${query}&maxResults=100`;
 
-      if (__DEV__) {
-        console.log('[Gmail] APIリクエスト中...');
-      }
       const response = await fetch(url, {
         headers: {
           Authorization: `Bearer ${accessToken}`,
@@ -64,20 +54,13 @@ export const fetchSubscriptionEmails = async (
 
       if (!response.ok) {
         const error = await response.json() as any;
-        if (__DEV__) {
-          console.error('[Gmail] APIエラー:', error);
-        }
         throw new Error(error.error?.message || 'Failed to fetch emails');
       }
 
       const data = await response.json() as any;
       const messages = data.messages || [];
-      if (__DEV__) {
-        console.log(`[Gmail] 取得: ${messages.length}件 (累計: ${allMessages.length + messages.length}件)`);
-      }
       allMessages.push(...messages);
 
-      // 進捗を通知
       if (onProgress) {
         onProgress(allMessages.length);
       }
@@ -88,9 +71,6 @@ export const fetchSubscriptionEmails = async (
 
     return maxResults !== undefined ? allMessages.slice(0, maxResults) : allMessages;
   } catch (error: any) {
-    if (__DEV__) {
-      console.error('[Gmail] fetchSubscriptionEmails エラー:', error);
-    }
     throw new Error(error.message || 'メールの取得に失敗しました');
   }
 };
@@ -113,9 +93,6 @@ export const fetchEmailDetail = async (
 
     return await response.json() as GmailMessageDetail;
   } catch (error: any) {
-    if (__DEV__) {
-      console.error('[Gmail] fetchEmailDetail エラー:', error);
-    }
     throw new Error(error.message || 'メール詳細の取得に失敗しました');
   }
 };
@@ -143,9 +120,6 @@ export const fetchMultipleEmailDetails = async (
 
     return results;
   } catch (error: any) {
-    if (__DEV__) {
-      console.error('[Gmail] fetchMultipleEmailDetails エラー:', error);
-    }
     throw new Error(error.message || '複数メールの取得に失敗しました');
   }
 };

@@ -80,10 +80,7 @@ export async function schedulePaymentReminder(
     );
 
     return notificationId;
-  } catch (error) {
-    if (__DEV__) {
-      console.error('Failed to schedule notification:', error);
-    }
+  } catch {
     return null;
   }
 }
@@ -92,10 +89,8 @@ export async function schedulePaymentReminder(
 export async function cancelPaymentReminder(subscriptionId: string): Promise<void> {
   try {
     await notifee.cancelNotification(`payment-${subscriptionId}`);
-  } catch (error) {
-    if (__DEV__) {
-      console.error('Failed to cancel notification:', error);
-    }
+  } catch {
+    // キャンセルエラーは無視
   }
 }
 
@@ -103,10 +98,8 @@ export async function cancelPaymentReminder(subscriptionId: string): Promise<voi
 export async function cancelAllReminders(): Promise<void> {
   try {
     await notifee.cancelAllNotifications();
-  } catch (error) {
-    if (__DEV__) {
-      console.error('Failed to cancel all notifications:', error);
-    }
+  } catch {
+    // キャンセルエラーは無視
   }
 }
 

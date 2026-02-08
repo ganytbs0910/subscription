@@ -61,8 +61,15 @@ export default function SubscriptionListScreen() {
       const q = searchQuery.toLowerCase();
       result = result.filter(s => s.name.toLowerCase().includes(q));
     }
-    // Sort
+    // Sort: 契約中 → 課金 → 解約済み、その後にユーザー選択のソート
+    const getGroupOrder = (s: typeof result[0]) => {
+      if (s.isActive && s.type !== 'payment') return 0; // 契約中
+      if (s.type === 'payment') return 1; // 課金
+      return 2; // 解約済み
+    };
     result = [...result].sort((a, b) => {
+      const groupDiff = getGroupOrder(a) - getGroupOrder(b);
+      if (groupDiff !== 0) return groupDiff;
       if (sortMode === 'name') return a.name.localeCompare(b.name);
       if (sortMode === 'price') return b.price - a.price;
       if (sortMode === 'nextBilling') {

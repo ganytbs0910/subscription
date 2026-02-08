@@ -44,10 +44,8 @@ export const signInWithGoogle = async () => {
 export const signOutGoogle = async () => {
   try {
     await GoogleSignin.signOut();
-  } catch (error) {
-    if (__DEV__) {
-      console.error('Sign out error:', error);
-    }
+  } catch {
+    // サインアウトエラーは無視
   }
 };
 

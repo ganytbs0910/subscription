@@ -5,6 +5,7 @@ import {
   StyleSheet,
   TouchableOpacity,
   Modal,
+  ScrollView,
   Platform,
   UIManager,
 } from 'react-native';
@@ -23,6 +24,8 @@ interface Props {
 }
 
 const MONTH_OPTIONS = [3, 6, 12, 24];
+const ROW_HEIGHT = 28;
+const MAX_VISIBLE_ROWS = 8;
 
 export default function MonthlyBarChart({ subscriptions, currency }: Props) {
   const theme = useTheme();
@@ -44,6 +47,33 @@ export default function MonthlyBarChart({ subscriptions, currency }: Props) {
     setShowModal(false);
   };
 
+  const chartHeight = Math.min(reversed.length, MAX_VISIBLE_ROWS) * ROW_HEIGHT;
+  const needsScroll = reversed.length > MAX_VISIBLE_ROWS;
+
+  const chartContent = reversed.map((item) => {
+    const widthPercent = (item.total / maxTotal) * 100;
+    const shortLabel = `${item.month}月`;
+    return (
+      <View key={`${item.year}-${item.month}`} style={styles.rowWrapper}>
+        <Text style={styles.rowLabel}>{shortLabel}</Text>
+        <View style={styles.barTrack}>
+          <View
+            style={[
+              styles.bar,
+              {
+                width: `${Math.max(widthPercent, 1)}%`,
+                backgroundColor: theme.colors.primary,
+              },
+            ]}
+          />
+        </View>
+        <Text style={styles.rowValue}>
+          {item.total > 0 ? formatPrice(item.total, currency) : '¥0'}
+        </Text>
+      </View>
+    );
+  });
+
   return (
     <View style={styles.container}>
       <View style={styles.header}>
@@ -55,31 +85,13 @@ export default function MonthlyBarChart({ subscriptions, currency }: Props) {
           <Icon name="cog-outline" size={20} color={theme.colors.textSecondary} />
         </TouchableOpacity>
       </View>
-      <View style={styles.chartContainer}>
-        {reversed.map((item) => {
-          const heightPercent = (item.total / maxTotal) * 100;
-          const shortLabel = `${item.month}月`;
-          return (
-            <View key={`${item.year}-${item.month}`} style={styles.barWrapper}>
-              <Text style={styles.barValue}>
-                {item.total > 0 ? formatPrice(item.total, currency) : ''}
-              </Text>
-              <View style={styles.barTrack}>
-                <View
-                  style={[
-                    styles.bar,
-                    {
-                      height: `${Math.max(heightPercent, 2)}%`,
-                      backgroundColor: theme.colors.primary,
-                    },
-                  ]}
-                />
-              </View>
-              <Text style={styles.barLabel}>{shortLabel}</Text>
-            </View>
-          );
-        })}
-      </View>
+      {needsScroll ? (
+        <ScrollView style={{ maxHeight: chartHeight }} showsVerticalScrollIndicator={false}>
+          {chartContent}
+        </ScrollView>
+      ) : (
+        <View>{chartContent}</View>
+      )}
 
       {/* 月数選択モーダル */}
       <Modal
@@ -135,7 +147,7 @@ const createStyles = (theme: ReturnType<typeof useTheme>) =>
       flexDirection: 'row',
       justifyContent: 'space-between',
       alignItems: 'center',
-      marginBottom: 16,
+      marginBottom: 12,
     },
     title: {
       fontSize: 16,
@@ -145,39 +157,37 @@ const createStyles = (theme: ReturnType<typeof useTheme>) =>
     settingsButton: {
       padding: 4,
     },
-    chartContainer: {
+    rowWrapper: {
       flexDirection: 'row',
-      alignItems: 'flex-end',
-      height: 160,
-      gap: 8,
-    },
-    barWrapper: {
-      flex: 1,
       alignItems: 'center',
-      height: '100%',
-      justifyContent: 'flex-end',
+      height: ROW_HEIGHT,
     },
-    barValue: {
-      fontSize: 9,
-      color: theme.colors.textSecondary,
-      marginBottom: 4,
-      textAlign: 'center',
-    },
-    barTrack: {
-      width: '100%',
-      height: '80%',
-      justifyContent: 'flex-end',
-      alignItems: 'center',
-    },
-    bar: {
-      width: '70%',
-      borderRadius: 6,
-      minHeight: 4,
-    },
-    barLabel: {
+    rowLabel: {
+      width: 36,
       fontSize: 11,
       color: theme.colors.textSecondary,
-      marginTop: 6,
+      textAlign: 'right',
+      marginRight: 8,
+    },
+    barTrack: {
+      flex: 1,
+      height: 16,
+      backgroundColor: theme.colors.background,
+      borderRadius: 4,
+      overflow: 'hidden',
+      justifyContent: 'center',
+    },
+    bar: {
+      height: '100%',
+      borderRadius: 4,
+      minWidth: 2,
+    },
+    rowValue: {
+      width: 70,
+      fontSize: 11,
+      color: theme.colors.textSecondary,
+      textAlign: 'right',
+      marginLeft: 8,
     },
     modalOverlay: {
       flex: 1,

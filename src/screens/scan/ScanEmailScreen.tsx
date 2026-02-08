@@ -60,7 +60,7 @@ type ScanStatus = 'idle' | 'signing_in' | 'connecting' | 'fetching' | 'parsing' 
 export default function ScanEmailScreen() {
   const theme = useTheme();
   const navigation = useNavigation<NavigationProp>();
-  const { addSubscription, subscriptions } = useSubscriptionStore();
+  const { addSubscription, subscriptions, settings } = useSubscriptionStore();
 
   const [provider, setProvider] = useState<EmailProvider | null>(null);
   const [status, setStatus] = useState<ScanStatus>('idle');
@@ -137,20 +137,12 @@ export default function ScanEmailScreen() {
       setUserEmail(user?.email || null);
 
       setStatus('fetching');
-      // デバッグ: まず100件で確認
+      const scanMaxCount = settings.emailScanMaxCount ?? 500;
       const messages = await fetchSubscriptionEmails(
         accessToken,
-        100, // デバッグ用に100件に制限
+        scanMaxCount,
         (fetched) => setProgress({ current: fetched, total: 0 }),
       );
-
-      if (__DEV__) {
-        console.log('========================================');
-        console.log(`[SCAN] 取得したメール数: ${messages.length}件`);
-        console.log('========================================');
-        // デバッグ用Alert
-        Alert.alert('デバッグ', `取得したメール: ${messages.length}件`);
-      }
 
       if (messages.length === 0) {
         setStatus('done');
@@ -158,7 +150,11 @@ export default function ScanEmailScreen() {
         return;
       }
 
-      // 全メールの詳細を取得
+      // 過去N年分のメールのみ取得
+      const yearsBack = settings.emailScanYearsBack ?? 3;
+      const cutoffDate = new Date();
+      cutoffDate.setFullYear(cutoffDate.getFullYear() - yearsBack);
+
       setProgress({ current: 0, total: messages.length });
       const messageIds = messages.map((m) => m.id);
       const emailDetails = await fetchMultipleEmailDetails(
@@ -167,68 +163,14 @@ export default function ScanEmailScreen() {
         (current, total) => setProgress({ current, total }),
       );
 
-      // デバッグ: メールの送信者と件名をログ出力（開発環境のみ）
-      if (__DEV__) {
-        console.log('\n[SCAN] メール一覧:');
-      }
-      const appleEmails: typeof emailDetails = [];
-      const otherPaymentEmails: typeof emailDetails = [];
-
-      for (const email of emailDetails) {
-        const from = email.payload?.headers?.find(h => h.name.toLowerCase() === 'from')?.value || '';
-        const subject = email.payload?.headers?.find(h => h.name.toLowerCase() === 'subject')?.value || '';
-
-        // Apple領収書かどうか
-        const isApple = /no_reply@email\.apple\.com/i.test(from);
-        const isReceipt = /領収書|receipt/i.test(subject);
-
-        if (isApple) {
-          appleEmails.push(email);
-          if (__DEV__) {
-            console.log(`  📱 [Apple] ${subject}`);
-            if (isReceipt) {
-              console.log(`      ↳ 領収書メール ✓`);
-            }
-          }
-        } else if (/payment|receipt|invoice|請求|領収|支払|購入|注文/i.test(subject)) {
-          otherPaymentEmails.push(email);
-          if (__DEV__) {
-            console.log(`  💳 [課金] ${subject} (from: ${from.substring(0, 50)})`);
-          }
-        }
-      }
-
-      if (__DEV__) {
-        console.log('\n----------------------------------------');
-        console.log(`[SCAN] Appleからのメール: ${appleEmails.length}件`);
-        console.log(`[SCAN] その他の課金メール: ${otherPaymentEmails.length}件`);
-        console.log('----------------------------------------\n');
-
-        // Apple領収書の詳細をログ出力（最初の3件）
-        if (appleEmails.length > 0) {
-          console.log('[SCAN] Apple領収書の内容サンプル:');
-          for (let i = 0; i < Math.min(3, appleEmails.length); i++) {
-            const email = appleEmails[i];
-            const subject = email.payload?.headers?.find(h => h.name.toLowerCase() === 'subject')?.value || '';
-            const body = extractEmailBodyForLog(email);
-            console.log(`\n--- Apple領収書 #${i + 1}: ${subject} ---`);
-            console.log(body.substring(0, 1500)); // 最初の1500文字
-            console.log('--- END ---\n');
-          }
-        }
-      }
+      // 過去N年分のみフィルタ
+      const filteredDetails = emailDetails.filter((email) => {
+        const dateMs = parseInt(email.internalDate, 10);
+        return !isNaN(dateMs) && dateMs >= cutoffDate.getTime();
+      });
 
       setStatus('parsing');
-      const detected = parseMultipleEmails(emailDetails);
-
-      if (__DEV__) {
-        console.log('\n========================================');
-        console.log(`[SCAN] 検出されたサブスク/課金: ${detected.length}件`);
-        for (const d of detected) {
-          console.log(`  - ${d.name}: ${d.price ?? '金額不明'} ${d.currency || ''} (${d.type})`);
-        }
-        console.log('========================================\n');
-      }
+      const detected = parseMultipleEmails(filteredDetails);
 
       const existingNames = new Set(subscriptions.map((s) => s.name.toLowerCase()));
       const newSubscriptions = detected.filter(
@@ -243,41 +185,8 @@ export default function ScanEmailScreen() {
         Alert.alert('結果', '検出されたサブスク・課金はすべて登録済みです');
       }
     } catch (error: any) {
-      if (__DEV__) {
-        console.error('[SCAN] エラー:', error);
-      }
       setStatus('error');
       setErrorMessage(error.message || 'スキャン中にエラーが発生しました');
-    }
-  };
-
-  // デバッグ用: メール本文を抽出
-  const extractEmailBodyForLog = (email: any): string => {
-    try {
-      const parts = email.payload?.parts || [email.payload];
-      let body = '';
-
-      for (const part of parts) {
-        if (part?.body?.data) {
-          const base64 = part.body.data.replace(/-/g, '+').replace(/_/g, '/');
-          body += decodeURIComponent(
-            atob(base64)
-              .split('')
-              .map(c => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2))
-              .join(''),
-          );
-        }
-      }
-
-      // HTMLタグを除去
-      return body
-        .replace(/<[^>]+>/g, '\n')
-        .replace(/&nbsp;/g, ' ')
-        .replace(/&#165;/g, '¥')
-        .replace(/\s+/g, ' ')
-        .trim();
-    } catch {
-      return '[本文の取得に失敗]';
     }
   };
 

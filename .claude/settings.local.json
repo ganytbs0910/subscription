@@ -49,7 +49,9 @@
       "Bash(xcrun simctl io:*)",
       "Bash(for f in promo-images/promo_*.png)",
       "Bash(done)",
-      "Bash(for f in promo-images/ipad_promo_*.png)"
+      "Bash(for f in promo-images/ipad_promo_*.png)",
+      "Bash(ps:*)",
+      "Bash(sips:*)"
     ]
   }
 }

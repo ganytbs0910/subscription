@@ -47,6 +47,8 @@ export const useSubscriptionStore = create<SubscriptionState>()(
         notificationsEnabled: false,
         notificationDaysBefore: 1,
         hasSeenOnboarding: false,
+        emailScanMaxCount: 500,
+        emailScanYearsBack: 3,
       },
 
       addSubscription: (subscriptionData) => {

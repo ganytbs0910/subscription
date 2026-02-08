@@ -53,13 +53,6 @@ export default class ErrorBoundary extends Component<Props, State> {
               アプリで予期しないエラーが発生しました。{'\n'}
               ご不便をおかけして申し訳ございません。
             </Text>
-            {__DEV__ && this.state.error && (
-              <View style={styles.errorDetails}>
-                <Text style={styles.errorText}>
-                  {this.state.error.toString()}
-                </Text>
-              </View>
-            )}
             <TouchableOpacity style={styles.button} onPress={this.handleRetry}>
               <Icon name="refresh" size={20} color="#FFFFFF" />
               <Text style={styles.buttonText}>再試行</Text>

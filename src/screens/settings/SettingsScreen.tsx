@@ -35,6 +35,9 @@ export default function SettingsScreen() {
   const [budgetText, setBudgetText] = useState(
     settings.monthlyBudget?.toString() || ''
   );
+  const [maxCountText, setMaxCountText] = useState(
+    (settings.emailScanMaxCount ?? 500).toString()
+  );
   const [notificationsEnabled, setNotificationsEnabled] = useState(
     settings.notificationsEnabled || false
   );
@@ -45,6 +48,13 @@ export default function SettingsScreen() {
     { value: 'system', label: 'システム設定', icon: 'cellphone-cog' },
     { value: 'light', label: 'ライト', icon: 'white-balance-sunny' },
     { value: 'dark', label: 'ダーク', icon: 'moon-waning-crescent' },
+  ];
+
+  const emailYearsOptions = [
+    { value: 1, label: '1年' },
+    { value: 2, label: '2年' },
+    { value: 3, label: '3年' },
+    { value: 5, label: '5年' },
   ];
 
   const notificationDaysOptions = [
@@ -247,6 +257,59 @@ export default function SettingsScreen() {
       </View>
 
       <View style={styles.section}>
+        <Text style={styles.sectionTitle}>メールスキャン</Text>
+        <View style={styles.card}>
+          <View style={styles.settingRow}>
+            <View style={styles.settingLeft}>
+              <Icon name="email-outline" size={22} color={theme.colors.primary} />
+              <Text style={styles.settingLabel}>取得上限数</Text>
+            </View>
+            <TextInput
+              style={styles.inlineInput}
+              value={maxCountText}
+              onChangeText={(text) => {
+                setMaxCountText(text);
+                const num = Number(text);
+                if (!isNaN(num) && num > 0) {
+                  updateSettings({ emailScanMaxCount: num });
+                }
+              }}
+              keyboardType="numeric"
+              placeholder="500"
+              placeholderTextColor={theme.colors.textSecondary}
+            />
+          </View>
+          <View style={styles.settingRowBorder} />
+          <View style={styles.daysSelector}>
+            <Text style={styles.daysSelectorLabel}>取得期間</Text>
+            <View style={styles.daysOptions}>
+              {emailYearsOptions.map((option) => (
+                <TouchableOpacity
+                  key={option.value}
+                  style={[
+                    styles.daysOption,
+                    (settings.emailScanYearsBack ?? 3) === option.value &&
+                      styles.daysOptionActive,
+                  ]}
+                  onPress={() => updateSettings({ emailScanYearsBack: option.value })}
+                >
+                  <Text
+                    style={[
+                      styles.daysOptionText,
+                      (settings.emailScanYearsBack ?? 3) === option.value &&
+                        styles.daysOptionTextActive,
+                    ]}
+                  >
+                    {option.label}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          </View>
+        </View>
+      </View>
+
+      <View style={styles.section}>
         <Text style={styles.sectionTitle}>統計情報</Text>
         <View style={styles.card}>
           <View style={styles.statsRow}>
@@ -392,6 +455,14 @@ const createStyles = (theme: ReturnType<typeof useTheme>) =>
       flex: 1,
       fontSize: 18,
       color: theme.colors.text,
+      padding: 0,
+    },
+    inlineInput: {
+      fontSize: 16,
+      fontWeight: '600',
+      color: theme.colors.primary,
+      textAlign: 'right',
+      width: 80,
       padding: 0,
     },
     daysSelector: {

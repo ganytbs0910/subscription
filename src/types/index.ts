@@ -87,8 +87,10 @@ export interface AppSettings {
   language: string;
   monthlyBudget?: number;
   notificationsEnabled?: boolean;
-  notificationDaysBefore?: number; // 何日前に通知するか
+  notificationDaysBefore?: number;
   hasSeenOnboarding?: boolean;
+  emailScanMaxCount?: number;
+  emailScanYearsBack?: number;
 }
 
 export type RootStackParamList = {
